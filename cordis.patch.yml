@@ -1,0 +1,4 @@
+- insert:
+    - id: mbrowser
+      name: '@local/mbrowser'
+      config: {}

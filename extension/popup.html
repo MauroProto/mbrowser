@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>mbrowser · Estado y permisos</title>
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="popup.js"></script>
+</head>
+<body class="popup">
+  <header class="brand compact">
+    <img src="icons/icon-48.png" width="40" height="40" alt="">
+    <div><h1>mbrowser</h1><p>Tu Chrome, bajo tu control</p></div>
+    <span class="local-tag">LOCAL</span>
+  </header>
+  <main>
+    <section class="status-card" aria-label="Estado de la conexión">
+      <div class="status-line"><span class="status-dot" id="status-dot"></span><h2 id="status-title">Comprobando estado…</h2></div>
+      <p id="status-detail">La autorización se guarda solo en contextos de confianza de Chrome.</p>
+      <p class="status-count" id="tab-count"></p>
+    </section>
+    <section class="scope-summary" aria-label="Alcance autorizado" id="grant-summary" hidden>
+      <div class="section-line"><h2>Alcance autorizado</h2><span id="scope-kind" class="small-tag"></span></div>
+      <p id="tab-scope"></p>
+      <ul class="origin-list compact-list" id="origin-list"></ul>
+    </section>
+    <p class="notice" id="notice" hidden></p>
+    <div class="popup-actions">
+      <button type="button" id="pause" class="button primary" hidden>Pausar control</button>
+      <button type="button" id="resume" class="button primary" hidden>Reanudar con este alcance</button>
+      <button type="button" id="activity" class="button secondary">Ver actividad del agente</button>
+      <button type="button" id="settings" class="button secondary">Configurar autorización</button>
+    </div>
+    <p id="feedback" class="feedback" role="status" aria-live="polite" hidden></p>
+    <button type="button" id="revoke" class="text-button danger" hidden>Revocar autorización…</button>
+  </main>
+  <footer class="popup-footer">El aviso de depuración es una protección de Chrome. Si lo cancelas, mbrowser se pausa.</footer>
+  <dialog id="revoke-dialog" class="confirm-dialog">
+    <form method="dialog">
+      <p class="eyebrow">TÚ DECIDES</p>
+      <h2>¿Revocar el acceso?</h2>
+      <p>Se detendrá el control y se eliminará la autorización de esta extensión. Tus pestañas no se cerrarán. Para volver a conectar necesitarás un código nuevo.</p>
+      <div class="dialog-actions"><button value="cancel" class="button secondary">Cancelar</button><button value="revoke" class="button danger-button">Revocar acceso</button></div>
+    </form>
+  </dialog>
+</body>
+</html>

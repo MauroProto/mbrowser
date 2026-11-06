@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>mbrowser · Actividad</title>
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="panel.js"></script>
+</head>
+<body class="activity-panel">
+  <header class="brand compact">
+    <img src="icons/icon-48.png" width="36" height="36" alt="">
+    <div><h1>mbrowser</h1><p>Actividad del agente</p></div>
+    <span class="local-tag">LOCAL</span>
+  </header>
+  <main>
+    <section class="status-card" aria-label="Estado de la conexión">
+      <div class="status-line"><span id="status-dot" class="status-dot"></span><h2 id="status-title">Comprobando estado…</h2></div>
+      <p id="status-detail"></p>
+    </section>
+    <p id="notice" class="notice" hidden></p>
+    <div class="panel-actions">
+      <button type="button" id="pause" class="button primary" hidden>Pausar</button>
+      <button type="button" id="resume" class="button primary" hidden>Reanudar</button>
+      <button type="button" id="settings" class="button secondary">Permisos</button>
+    </div>
+    <p id="feedback" class="feedback" role="status" hidden></p>
+    <section class="panel-section" aria-labelledby="tabs-title">
+      <h2 id="tabs-title">Pestañas del agente</h2>
+      <p id="empty" class="help">Las pestañas aparecen cuando el agente empieza a trabajar.</p>
+      <ul id="activity-tabs" class="activity-tabs"></ul>
+    </section>
+    <section class="panel-section" aria-labelledby="preview-title">
+      <h2 id="preview-title">Vista previa local</h2>
+      <p id="preview-help" class="help">Muestra una pestaña creada por mbrowser y su cursor. Las imágenes pueden contener datos de la página y se muestran solo en este panel.</p>
+      <label for="preview-tab">Pestaña</label>
+      <select id="preview-tab" aria-describedby="preview-help" disabled></select>
+      <button type="button" id="toggle-preview" class="button secondary" aria-pressed="false" disabled>Ver vista previa</button>
+      <p id="preview-state" class="help" role="status" hidden></p>
+      <canvas id="preview-frame" aria-label="Vista previa de la pestaña automatizada" hidden></canvas>
+    </section>
+    <button type="button" id="revoke" class="text-button danger" hidden>Revocar autorización…</button>
+  </main>
+  <dialog id="revoke-dialog" class="confirm-dialog">
+    <form method="dialog">
+      <h2>¿Revocar el acceso?</h2>
+      <p>Se detendrá el control. Para volver a conectar, pide un código nuevo a Harness.</p>
+      <div class="dialog-actions"><button value="cancel" class="button secondary">Cancelar</button><button value="revoke" class="button danger-button">Revocar acceso</button></div>
+    </form>
+  </dialog>
+</body>
+</html>

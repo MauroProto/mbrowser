@@ -1,0 +1,30 @@
+{
+  "method": "o200k_base BPE over minified OpenAI-style function definitions (name, description, parameters).",
+  "caveat": "Reference tool-schema tokens only, not full first-turn system/history tokens or provider-specific framing/billing. Runtime model encodings may differ.",
+  "before_v1": {
+    "tools": 10,
+    "schema_utf8_bytes": 4445,
+    "schema_characters": 4445,
+    "reference_tokens": 993
+  },
+  "after_v3": {
+    "tools": 12,
+    "schema_utf8_bytes": 5670,
+    "schema_characters": 5644,
+    "reference_tokens": 1184
+  },
+  "after_common_tools": {
+    "tools": 8,
+    "schema_utf8_bytes": 3342,
+    "schema_characters": 3322,
+    "reference_tokens": 701
+  },
+  "total_token_change": 191,
+  "common_tool_token_change": -292,
+  "capabilities_added": [
+    "mbrowser_status",
+    "mbrowser_navigate",
+    "mbrowser_press",
+    "mbrowser_scroll"
+  ]
+}

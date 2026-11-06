@@ -1,0 +1,192 @@
+[
+  {
+    "name": "mbrowser_open",
+    "description": "Open a URL in a BACKGROUND tab of the user's real Chrome (their visible tab does not change). Returns a tab id used by the other mbrowser tools. Set visible=true to bring the tab to the front so the user can watch the interaction.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "Absolute http(s) URL to open."
+        },
+        "visible": {
+          "type": "boolean",
+          "description": "Bring the tab to the front (default false = background, no visible change)."
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "mbrowser_snapshot",
+    "description": "Return an indexed list of the interactive elements on the current (or given) tab: [{i, tag, role, text, href, placeholder, value}]. Use the index with mbrowser_click/mbrowser_type as \"@<i>\" instead of guessing CSS selectors.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "tab_id": {
+          "type": "string",
+          "description": "Tab id. Omit for the last opened tab."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "mbrowser_tabs",
+    "description": "List every open tab of the user's Chrome with its id, title, URL, and whether mbrowser owns it.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "mbrowser_read",
+    "description": "Read the current (or given) tab: title, URL, and page text (default), HTML, or title only. Works while the tab stays in the background.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "tab_id": {
+          "type": "string",
+          "description": "Tab id from mbrowser_open. Omit to use the last opened tab."
+        },
+        "mode": {
+          "type": "string",
+          "description": "text (default), html, or title."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "mbrowser_js",
+    "description": "Evaluate JavaScript in the current (or given) tab and return the value. Use it to extract structured data from the DOM.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "tab_id": {
+          "type": "string",
+          "description": "Tab id. Omit for the last opened tab."
+        },
+        "code": {
+          "type": "string",
+          "description": "JavaScript expression to evaluate."
+        }
+      },
+      "required": [
+        "code"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "mbrowser_click",
+    "description": "Click an element in the current (or given) tab. Pass \"@<i>\" from mbrowser_snapshot (preferred) or a CSS selector. Shows an animated cursor overlay before clicking.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "tab_id": {
+          "type": "string",
+          "description": "Tab id. Omit for the last opened tab."
+        },
+        "selector": {
+          "type": "string",
+          "description": "CSS selector of the element to click."
+        }
+      },
+      "required": [
+        "selector"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "mbrowser_type",
+    "description": "Focus an element and type text into it (real input events). Pass \"@<i>\" from mbrowser_snapshot (preferred) or a CSS selector. Shows the animated cursor overlay.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "tab_id": {
+          "type": "string",
+          "description": "Tab id. Omit for the last opened tab."
+        },
+        "selector": {
+          "type": "string",
+          "description": "CSS selector of the input/textarea."
+        },
+        "text": {
+          "type": "string",
+          "description": "Text to type."
+        }
+      },
+      "required": [
+        "selector",
+        "text"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "mbrowser_wait",
+    "description": "Wait until an element matching a CSS selector exists in the current (or given) tab.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "tab_id": {
+          "type": "string",
+          "description": "Tab id. Omit for the last opened tab."
+        },
+        "selector": {
+          "type": "string",
+          "description": "CSS selector to wait for."
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "description": "Max wait in milliseconds (default 15000)."
+        }
+      },
+      "required": [
+        "selector"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "mbrowser_shot",
+    "description": "Capture a PNG screenshot of the current (or given) tab to a file path.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "tab_id": {
+          "type": "string",
+          "description": "Tab id. Omit for the last opened tab."
+        },
+        "path": {
+          "type": "string",
+          "description": "Absolute file path for the PNG."
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "mbrowser_close",
+    "description": "Close a tab that mbrowser opened (never one of the user's own tabs).",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "tab_id": {
+          "type": "string",
+          "description": "Tab id. Omit to close the last opened tab."
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+]
