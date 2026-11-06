@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { readFile, writeFile, readdir, mkdir, symlink } from 'node:fs/promises';
+import { readFile, writeFile, readdir, mkdir, realpath, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { BrowserEngine } from '../lib/engine.js';
 import { FakeTransport } from './helpers/fake-transport.js';
@@ -487,7 +487,7 @@ test('screenshot writes only a new PNG in the trusted workspace and never overwr
   transport.beforeSend = ({ method }) => method === 'Page.captureScreenshot' ? { data: PNG } : undefined;
   const path = join(workspace, 'capture.png');
   const result = await browser.execute('shot', { path });
-  assert.equal(result.path, path);
+  assert.equal(result.path, await realpath(path));
   assert.deepEqual(await readFile(path), Buffer.from(PNG, 'base64'));
   await assert.rejects(browser.execute('shot', { path }), { code: 'FILE_EXISTS' });
   assert.deepEqual(await readFile(path), Buffer.from(PNG, 'base64'));
