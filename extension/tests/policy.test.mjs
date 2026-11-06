@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile, access } from 'node:fs/promises';
 import {
-  bridgeUrl, normalizePort, normalizeAllowedOrigins, normalizeConsent,
+  bridgeUrl, normalizePort, normalizeAllowedOrigins,
   normalizePairCode, normalizeWebUrl, isAllowedUrl, parseTabId, validToken,
   validateCdp, safeError,
 } from '../policy.js';
@@ -17,7 +17,10 @@ test('manifest has the pinned ID and the minimal, isolated MV3 surface', async (
   assert.deepEqual(manifest.host_permissions, ['http://127.0.0.1/*']);
   assert.equal(manifest.background.type, 'module');
   assert.equal(manifest.incognito, 'not_allowed');
-  for (const key of ['content_scripts', 'externally_connectable', 'web_accessible_resources', 'optional_permissions']) {
+  assert.deepEqual(manifest.content_scripts, [{
+    matches: ['http://127.0.0.1/mbrowser/connect'], js: ['connect.js'], run_at: 'document_start', all_frames: false,
+  }]);
+  for (const key of ['externally_connectable', 'web_accessible_resources', 'optional_permissions']) {
     assert.equal(manifest[key], undefined);
   }
   const digest = createHash('sha256').update(Buffer.from(manifest.key, 'base64')).digest('hex').slice(0, 32);
@@ -25,7 +28,9 @@ test('manifest has the pinned ID and the minimal, isolated MV3 surface', async (
   assert.equal(id, 'fjgcljkoolmpniiomfmdjkplelohggna');
   assert.match(manifest.content_security_policy.extension_pages, /script-src 'self'/);
   assert.doesNotMatch(manifest.content_security_policy.extension_pages, /unsafe-eval|unsafe-inline|https:/);
-  const paths = [manifest.background.service_worker, manifest.action.default_popup, manifest.options_ui.page, manifest.side_panel.default_path, ...Object.values(manifest.icons)];
+  assert.equal(manifest.action.default_popup, undefined);
+  const paths = [manifest.background.service_worker, manifest.options_ui.page, manifest.side_panel.default_path,
+    ...manifest.content_scripts.flatMap(script => script.js), ...Object.values(manifest.icons)];
   await Promise.all(paths.map(path => access(new URL(`../${path}`, import.meta.url))));
 });
 
@@ -50,19 +55,16 @@ test('origins are exact canonical http(s) origins, or a separately approved wild
   assert.equal(isAllowedUrl('http://example.com/', ['https://example.com']), false);
   assert.equal(isAllowedUrl('chrome://settings/', ['*']), false);
   assert.equal(isAllowedUrl('https://user:password@example.com/', ['*']), false);
-  for (const value of [[], ['*', 'https://example.com'], ['https://*.example.com'], ['https://example.com/path'], ['https://example.com/.'], ['https:example.com'], ['https://example.com?q=1'], ['https://example.com?'], ['https://example.com/#x'], ['https://example.com/#'], ['https://@example.com'], ['https://user:pass@example.com'], ['file:///tmp'], ['null'], [' https://example.com']]) {
+  assert.deepEqual(normalizeAllowedOrigins([]), []);
+  assert.equal(isAllowedUrl('https://example.com/', []), false);
+  for (const value of [['*', 'https://example.com'], ['https://*.example.com'], ['https://example.com/path'], ['https://example.com/.'], ['https:example.com'], ['https://example.com?q=1'], ['https://example.com?'], ['https://example.com/#x'], ['https://example.com/#'], ['https://@example.com'], ['https://user:pass@example.com'], ['file:///tmp'], ['null'], [' https://example.com']]) {
     rejects(() => normalizeAllowedOrigins(value), 'INVALID_ORIGINS');
   }
 });
 
-test('pairing requires explicit consent and a bounded one-time code', () => {
+test('pairing uses a bounded one-time code', () => {
   assert.equal(normalizePairCode('abcd-1234-abcd-5678-abcd-1234-abcd-5678'), 'ABCD1234ABCD5678ABCD1234ABCD5678');
   for (const code of ['', 'ABCD', 'ABCD1234ABCD5678?token=x', 'abcd 1234 abcd 5678']) rejects(() => normalizePairCode(code), 'INVALID_PAIR_CODE');
-  rejects(() => normalizeConsent({ accepted: false, allowExistingTabs: false, allowedOrigins: ['*'] }), 'CONSENT_REQUIRED');
-  rejects(() => normalizeConsent({ accepted: true, allowedOrigins: ['*'] }), 'CONSENT_REQUIRED');
-  assert.deepEqual(normalizeConsent({ accepted: true, allowExistingTabs: false, allowedOrigins: ['https://example.com'] }), {
-    enabled: true, allowExistingTabs: false, allowedOrigins: ['https://example.com'],
-  });
   assert.equal(validToken('a'.repeat(64)), true);
   for (const token of ['short', 'x\n'.repeat(32), 'secret?token=abc', 123]) assert.equal(validToken(token), false);
 });

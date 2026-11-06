@@ -2,18 +2,22 @@ import {
   PROTOCOL, DEFAULT_PORT, CONSENT_VERSION, MAX_REQUEST_BYTES, MAX_RESULT_BYTES,
   MAX_HTTP_BYTES, MAX_COMMAND_MS, MAX_IN_FLIGHT, ExtensionError, fail, isRecord,
   normalizePort, bridgeUrl, normalizePairCode, validToken, normalizeAllowedOrigins,
-  normalizeConsent, normalizeWebUrl, isAllowedUrl, parseTabId, validChromeTabId,
+  normalizeWebUrl, isAllowedUrl, parseTabId, validChromeTabId,
   validRequestId, validateCdp, safeError,
 } from './policy.js';
 
-import { newNonce, PROOF_PATTERN, signProof, verifyProof } from './auth.js';
+import { newNonce, PAIR_CODE_PATTERN, PROOF_PATTERN, signProof, verifyProof } from './auth.js';
 
 const LOCAL_KEY = 'mbrowser.device.v2';
 const SESSION_KEY = 'mbrowser.session.v2';
 const RECONNECT_ALARM = 'mbrowser.reconnect';
 const REVOKE_ALARM = 'mbrowser.revoke';
+const IDLE_ALARM = 'mbrowser.idle';
 const HEARTBEAT_MS = 20_000;
 const AUTH_TIMEOUT_MS = 10_000;
+const SITE_APPROVAL_MS = 45_000;
+const IDLE_MS = 120_000;
+const ACTIVITY_SAVE_INTERVAL_MS = 5_000;
 const encoder = new TextEncoder();
 
 function defaultDevice() {
@@ -68,10 +72,11 @@ function loadDevice(value) {
     result.token = value.token;
     result.consentVersion = CONSENT_VERSION;
     result.approvedAt = value.approvedAt;
+    const origins = normalizeAllowedOrigins(value.grant.allowedOrigins);
     result.grant = {
       enabled: value.grant.enabled,
-      allowExistingTabs: value.grant.allowExistingTabs,
-      allowedOrigins: normalizeAllowedOrigins(value.grant.allowedOrigins),
+      allowExistingTabs: false,
+      allowedOrigins: origins.includes('*') ? [] : origins,
     };
   }
   return result;
@@ -82,6 +87,7 @@ export class BackgroundController {
   #chrome;
   #fetch;
   #WebSocket;
+  #now;
   #device = defaultDevice();
   #instanceId = null;
   #owned = new Set();
@@ -102,6 +108,8 @@ export class BackgroundController {
   #welcomed = false;
   #connection = 'unpaired';
   #notice = null;
+  #siteRequest = null;
+  #pendingLink = null;
   #epoch = 0;
   #revision = 0;
   #inFlight = new Map();
@@ -109,6 +117,8 @@ export class BackgroundController {
   #authTimer;
   #heartbeatTimer;
   #reconnectTimer;
+  #idleTimer;
+  #activeUntil = 0;
   #backoff = 0;
   #lastReceived = 0;
   #mutation = Promise.resolve();
@@ -119,10 +129,11 @@ export class BackgroundController {
   #authorizationReady = false;
   ready;
 
-  constructor({ chrome = globalThis.chrome, fetch = globalThis.fetch, WebSocket = globalThis.WebSocket } = {}) {
+  constructor({ chrome = globalThis.chrome, fetch = globalThis.fetch, WebSocket = globalThis.WebSocket, now = Date.now } = {}) {
     this.#chrome = chrome;
     this.#fetch = fetch;
     this.#WebSocket = WebSocket;
+    this.#now = now;
     this.ready = this.#initialize().catch(() => {
       this.#storageReady = false;
       this.#authorizationReady = false;
@@ -155,6 +166,12 @@ export class BackgroundController {
       this.#owned = new Set((Array.isArray(saved.ownedTabs) ? saved.ownedTabs : []).filter(validChromeTabId));
       this.#attached = new Set((Array.isArray(saved.attachedTabs) ? saved.attachedTabs : []).filter(validChromeTabId));
     }
+    const now = this.#now();
+    if (validSession && this.#device.grant.enabled && Number.isSafeInteger(saved.activeUntil) &&
+        saved.activeUntil > now && saved.activeUntil <= now + IDLE_MS) {
+      this.#activeUntil = saved.activeUntil;
+    }
+    this.#device.grant.enabled = this.#activeUntil > 0;
     const tabs = await this.#chrome.tabs.query({});
     const liveIds = new Set(tabs.filter(tab => !tab.incognito).map(tab => tab.id));
     this.#owned = new Set([...this.#owned].filter(id => liveIds.has(id)));
@@ -177,14 +194,43 @@ export class BackgroundController {
       void this.#flushRevocation().catch(() => {});
     }
     this.#notify();
-    if (this.#canConnect()) this.#connect();
+    if (this.#canConnect()) {
+      this.#scheduleIdle();
+      this.#connect();
+    }
   }
 
   isUiSender(sender) {
     const base = `chrome-extension://${this.#chrome.runtime.id}`;
     return sender?.id === this.#chrome.runtime.id &&
-      ['popup.html', 'options.html', 'panel.html'].some(page => sender.url === `${base}/${page}`) &&
+      ['options.html', 'panel.html'].some(page => sender.url === `${base}/${page}`) &&
       (!sender.origin || sender.origin === base);
+  }
+
+  async handleHandoff(message, sender) {
+    if (sender?.id !== this.#chrome.runtime.id || sender.frameId !== 0 ||
+        !validChromeTabId(sender.tab?.id) || sender.tab.incognito) {
+      fail('UNTRUSTED_SENDER', 'La conexión se inicia desde Harness.');
+    }
+    if (typeof message.code !== 'string' || !PAIR_CODE_PATTERN.test(message.code)) {
+      fail('INVALID_PAIR_CODE', 'Elegí /mbrowser de nuevo en Harness.');
+    }
+    const url = new URL(sender.url);
+    const port = normalizePort(url.port);
+    if (url.origin !== 'http://127.0.0.1:' + port || url.pathname !== '/mbrowser/connect' ||
+        url.search || sender.origin !== url.origin) fail('UNTRUSTED_SENDER', 'La conexión se inicia desde Harness.');
+    const current = await this.#chrome.tabs.get(sender.tab.id);
+    const here = new URL(current.pendingUrl || current.url);
+    if (current.id !== sender.tab.id || here.origin !== url.origin || here.pathname !== url.pathname || here.search) return;
+    const ticket = { tabId: current.id, port, code: message.code, expiresAt: this.#now() + 120_000 };
+    this.#pendingLink = ticket;
+    timer(() => { if (this.#pendingLink === ticket) this.#pendingLink = null; }, 120_000);
+    try {
+      await this.#chrome.tabs.update(current.id, { url: this.#chrome.runtime.getURL('options.html') });
+    } catch (error) {
+      if (this.#pendingLink === ticket) this.#pendingLink = null;
+      throw error;
+    }
   }
 
   status() {
@@ -195,17 +241,18 @@ export class BackgroundController {
       revision: this.#revision,
       paired: Boolean(this.#device.token),
       consentGranted: this.#device.consentVersion === CONSENT_VERSION,
-      enabled: Boolean(this.#device.token && grant.enabled),
+      enabled: Boolean(this.#device.token && grant.enabled && this.#activeUntil > this.#now()),
       connection: this.#connection,
       bridgePort: this.#device.port,
       permissions: {
-        enabled: Boolean(this.#device.token && grant.enabled),
+        enabled: Boolean(this.#device.token && grant.enabled && this.#activeUntil > this.#now()),
         allowExistingTabs: grant.allowExistingTabs,
         allowedOrigins: [...grant.allowedOrigins],
       },
       ownedTabCount: this.#owned.size,
       attachedTabCount: this.#attached.size,
       revocationPending: Boolean(this.#device.pendingRevocation),
+      siteRequest: this.#siteRequest && { id: this.#siteRequest.id, origin: this.#siteRequest.origin },
       notice: this.#notice,
     };
   }
@@ -219,8 +266,8 @@ export class BackgroundController {
         getStatus: ['action'],
         getActivity: ['action'],
         getPreview: ['action', 'tabId'],
-        pair: ['action', 'revision', 'port', 'code', 'consent'],
-        updatePermissions: ['action', 'revision', 'consent'],
+        consumeLink: ['action'],
+        decideSite: ['action', 'id', 'allow'],
         pause: ['action'],
         resume: ['action', 'revision', 'accepted'],
         revoke: ['action', 'confirmed'],
@@ -250,21 +297,28 @@ export class BackgroundController {
         }
         await this.#mutate(async () => {
           switch (message.action) {
-            case 'pair':
-              this.#checkRevision(message.revision);
-              await this.#pair(message);
+            case 'consumeLink': {
+              if (sender.url !== this.#chrome.runtime.getURL('options.html')) fail('UNTRUSTED_SENDER', 'La conexión se inicia desde Harness.');
+              const link = this.#pendingLink;
+              if (!link || sender.tab?.id !== link.tabId) break;
+              this.#pendingLink = null;
+              if (this.#now() >= link.expiresAt) fail('PAIRING_REJECTED', 'La conexión caducó. Elegí /mbrowser de nuevo en Harness.');
+              if (this.#device.token && this.#device.port !== link.port) {
+                fail('ALREADY_PAIRED', 'Desconectá el otro Harness en el panel y volvé a elegir /mbrowser.');
+              }
+              if (!this.#device.token) await this.#pair(link);
               break;
-            case 'updatePermissions':
-              this.#checkRevision(message.revision);
-              if (!this.#device.token) fail('NOT_PAIRED', 'Vincula primero la extensión con Harness.');
-              await this.#setGrant(normalizeConsent(message.consent), true);
+            }
+            case 'decideSite':
+              if (sender.url !== this.#chrome.runtime.getURL('panel.html')) fail('UNTRUSTED_SENDER', 'El permiso se confirma desde el panel.');
+              await this.#decideSite(message);
               break;
             case 'resume':
               this.#checkRevision(message.revision);
               if (message.accepted !== true || !this.#device.token || this.#device.consentVersion !== CONSENT_VERSION) {
                 fail('CONSENT_REQUIRED', 'Vincula la extensión y confirma el alcance antes de reanudar.');
               }
-              await this.#setGrant({ ...this.#device.grant, enabled: true }, false);
+              await this.#activate();
               break;
           }
         });
@@ -341,9 +395,9 @@ export class BackgroundController {
     return result;
   }
 
-  #saveDevice() {
+  #saveDevice(device = this.#device) {
     if (!this.#storageReady) return Promise.resolve();
-    const snapshot = structuredClone(this.#device);
+    const snapshot = structuredClone(device);
     const result = this.#deviceWrites.catch(() => {}).then(() => this.#chrome.storage.local.set({ [LOCAL_KEY]: snapshot })).catch(() => {
       this.#storageFailure();
       fail('STORAGE_UNAVAILABLE', 'Chrome no pudo guardar la autorización. El control se detuvo; desactiva la extensión en Chrome si no puedes guardar una pausa.');
@@ -361,7 +415,7 @@ export class BackgroundController {
     }
     const snapshot = {
       schema: 1, instanceId: this.#instanceId,
-      ownedTabs: [...this.#owned], attachedTabs: [...this.#attached], issuedContexts,
+      ownedTabs: [...this.#owned], attachedTabs: [...this.#attached], issuedContexts, activeUntil: this.#activeUntil,
     };
     const result = this.#sessionWrites.catch(() => {}).then(() => this.#chrome.storage.session.set({ [SESSION_KEY]: snapshot })).catch(() => {
       if (this.#device.grant.enabled || this.#authorizationReady) this.#storageFailure();
@@ -373,6 +427,7 @@ export class BackgroundController {
 
   #storageFailure() {
     this.#authorizationReady = false;
+    this.#endActivity();
     this.#device.grant.enabled = false;
     this.#revision++;
     this.#notice = 'STORAGE_UNAVAILABLE';
@@ -387,15 +442,15 @@ export class BackgroundController {
   #notify() {
     const status = this.status();
     this.#chrome.runtime.sendMessage({ type: 'mbrowser.status', status }).catch(() => {});
-    const text = status.enabled ? (status.connection === 'connected' ? 'ON' : '…') : (status.paired ? 'Ⅱ' : '');
+    const text = status.siteRequest ? '!' : status.enabled ? (status.connection === 'connected' ? 'ON' : '…') : (status.paired ? 'Ⅱ' : '');
     this.#chrome.action?.setBadgeText({ text }).catch(() => {});
-    this.#chrome.action?.setBadgeBackgroundColor({ color: status.enabled ? '#1b7563' : '#8a5b1b' }).catch(() => {});
+    this.#chrome.action?.setBadgeBackgroundColor({ color: status.enabled && !status.siteRequest ? '#1b7563' : '#8a5b1b' }).catch(() => {});
   }
 
   async #pair(message) {
     const port = normalizePort(message.port);
     const code = normalizePairCode(message.code);
-    const grant = normalizeConsent(message.consent);
+    const grant = { enabled: false, allowExistingTabs: false, allowedOrigins: [] };
     if (this.#device.pendingRevocation && this.#device.pendingRevocation.port !== port) {
       fail('REVOCATION_PENDING', 'Inicia el Harness anterior para confirmar la revocación antes de cambiar de puerto.');
     }
@@ -416,14 +471,14 @@ export class BackgroundController {
       });
       if (!response.ok) {
         if ([400, 401, 403, 409, 410, 429].includes(response.status)) {
-          fail('PAIRING_REJECTED', 'Harness rechazó el código: comprueba que sea nuevo, correcto y no haya caducado.');
+          fail('PAIRING_REJECTED', 'La conexión caducó. Elegí /mbrowser de nuevo en Harness.');
         }
         fail('BRIDGE_UNAVAILABLE', 'Harness no pudo completar la vinculación. Comprueba la conexión local.');
       }
       const data = await this.#readSmallJson(response);
       if (!isRecord(data) || data.protocol !== PROTOCOL || typeof data.nonce !== 'string' || !PROOF_PATTERN.test(data.nonce) ||
           !await verifyProof(code, data.proof, 'pair/response', ...binding, clientNonce, data.nonce)) {
-        fail('PAIRING_PROTOCOL', 'No se pudo verificar la identidad de Harness. Comprueba el puerto y usa un código nuevo.');
+        fail('PAIRING_PROTOCOL', 'No se pudo verificar Harness. Elegí /mbrowser de nuevo en Harness.');
       }
       const token = await signProof(code, 'pair/device', ...binding, clientNonce, data.nonce);
       if (epoch !== this.#epoch) {
@@ -443,10 +498,8 @@ export class BackgroundController {
       if (epoch !== this.#epoch) fail('CONSENT_CHANGED', 'La extensión quedó en pausa porque cambió tu autorización.');
       await this.#chrome.alarms.clear(REVOKE_ALARM);
       if (epoch !== this.#epoch) fail('CONSENT_CHANGED', 'La autorización cambió antes de conectar. Revisa el estado actual.');
-      this.#authorizationReady = true;
-      this.#connection = 'waiting';
+      this.#connection = 'paused';
       this.#notify();
-      this.#connect();
     } catch (error) {
       this.#connection = this.#device.token ? 'paused' : 'unpaired';
       this.#notice = error instanceof ExtensionError ? error.code : 'BRIDGE_UNAVAILABLE';
@@ -501,19 +554,44 @@ export class BackgroundController {
     }
   }
 
-  async #setGrant(grant, recordConsent) {
+  #scheduleIdle() {
+    clearTimeout(this.#idleTimer);
+    this.#idleTimer = timer(() => { void this.#expireIdle().catch(() => {}); }, Math.max(0, this.#activeUntil - this.#now()));
+    void this.#chrome.alarms.create(IDLE_ALARM, { when: this.#activeUntil }).catch(() => {});
+  }
+
+  #endActivity() {
+    this.#activeUntil = 0;
+    clearTimeout(this.#idleTimer);
+    void this.#chrome.alarms.clear(IDLE_ALARM).catch(() => {});
+  }
+
+  #markActivity() {
+    const next = this.#now() + IDLE_MS;
+    if (next - this.#activeUntil < ACTIVITY_SAVE_INTERVAL_MS) return;
+    this.#activeUntil = next;
+    this.#scheduleIdle();
+    void this.#saveSession().catch(() => {});
+  }
+
+  async #expireIdle() {
+    if (this.#activeUntil && this.#now() >= this.#activeUntil) await this.#pause('IDLE');
+  }
+
+  async #activate() {
     this.#authorizationReady = false;
-    this.#device.grant = { ...grant, allowedOrigins: [...grant.allowedOrigins] };
-    if (recordConsent) this.#device.approvedAt = new Date().toISOString();
+    this.#device.grant.enabled = true;
+    this.#activeUntil = this.#now() + IDLE_MS;
+    this.#scheduleIdle();
     this.#revision++;
     this.#notice = null;
     this.#sendPermissions();
     this.#invalidate(new ExtensionError('PERMISSIONS_CHANGED', 'El usuario cambió los permisos. La operación se canceló.'));
     const epoch = this.#epoch;
     this.#disconnect();
-    this.#connection = grant.enabled ? 'waiting' : 'paused';
+    this.#connection = 'waiting';
     this.#notify();
-    await Promise.all([this.#saveDevice(), this.#releaseAll()]);
+    await Promise.all([this.#saveDevice(), this.#saveSession(), this.#releaseAll()]);
     if (epoch !== this.#epoch) return;
     this.#authorizationReady = Boolean(this.#device.token && this.#device.grant.enabled);
     if (this.#canConnect()) this.#connect();
@@ -521,6 +599,8 @@ export class BackgroundController {
 
   async #pause(notice) {
     this.#authorizationReady = false;
+    this.#pendingLink = null;
+    this.#endActivity();
     this.#device.grant.enabled = false;
     this.#revision++;
     this.#notice = notice;
@@ -529,7 +609,7 @@ export class BackgroundController {
     this.#disconnect();
     this.#connection = this.#device.token ? 'paused' : 'unpaired';
     this.#notify();
-    await Promise.all([this.#saveDevice(), this.#releaseAll()]);
+    await Promise.all([this.#saveDevice(), this.#saveSession(), this.#releaseAll()]);
     this.#notify();
   }
 
@@ -588,6 +668,7 @@ export class BackgroundController {
 
   #canConnect() {
     return this.#storageReady && this.#authorizationReady && Boolean(this.#device.token) && this.#device.grant.enabled &&
+      this.#activeUntil > this.#now() &&
       this.#device.consentVersion === CONSENT_VERSION && !this.#device.pendingRevocation;
   }
 
@@ -723,6 +804,7 @@ export class BackgroundController {
     this.#invalidate(new ExtensionError('DISCONNECTED', 'Se perdió la conexión con Harness. La operación no se reintentó.'));
     if (event.code === 1008) {
       this.#authorizationReady = false;
+      this.#endActivity();
       if (authenticated) {
         this.#device.token = null;
         this.#device.consentVersion = 0;
@@ -734,6 +816,7 @@ export class BackgroundController {
       await this.#saveDevice().catch(() => {});
     } else if (authenticated && event.code === 1000 && event.reason === 'replaced') {
       this.#authorizationReady = false;
+      this.#endActivity();
       this.#device.grant.enabled = false;
       this.#revision++;
       this.#notice = 'CONNECTION_REPLACED';
@@ -778,6 +861,7 @@ export class BackgroundController {
     await this.ready;
     if (alarm.name === RECONNECT_ALARM && this.#canConnect()) this.#connect();
     if (alarm.name === REVOKE_ALARM) await this.#flushRevocation();
+    if (alarm.name === IDLE_ALARM) await this.#expireIdle();
   }
 
   async handleStartup() {
@@ -788,6 +872,7 @@ export class BackgroundController {
 
   #invalidate(reason) {
     this.#epoch++;
+    this.#siteRequest = null;
     for (const context of this.#inFlight.values()) context.controller.abort(reason);
     for (const id of this.#contexts.keys()) this.#clearDocument(id);
     this.#mainFrames.clear();
@@ -857,6 +942,7 @@ export class BackgroundController {
       this.#assertContext(context);
       const result = await this.#execute(message.method, message.params, context);
       this.#assertContext(context);
+      if (message.method === 'open' || message.method === 'send') this.#markActivity();
       const sent = this.#sendFrame({ type: 'result', id, ok: true, result }, socket);
       if (!sent && this.#socket === socket && socket.readyState === 1) {
         replyError(new ExtensionError('RESULT_TOO_LARGE', 'El resultado supera el tamaño permitido. Reduce la observación.'));
@@ -897,6 +983,51 @@ export class BackgroundController {
 
   #commandParams(params, names) {
     if (!isRecord(params) || Object.keys(params).some(key => !names.includes(key))) fail('INVALID_ARGUMENT', 'Los parámetros de la orden no son válidos.');
+  }
+
+  async #awaitSiteApproval(url, context) {
+    if (isAllowedUrl(url, this.#device.grant.allowedOrigins)) return;
+    if (this.#siteRequest) fail('SITE_APPROVAL_PENDING', 'Ya hay un sitio esperando tu decisión en el panel de mbrowser.');
+    if (this.#device.grant.allowedOrigins.length >= 100) fail('SITE_LIMIT', 'Se alcanzó el límite de sitios para esta conexión.');
+    const [origin] = normalizeAllowedOrigins([new URL(url).origin], { allowWildcard: false });
+    let decide;
+    const answer = new Promise(resolve => { decide = resolve; });
+    const pending = { id: crypto.randomUUID(), origin, decide };
+    this.#siteRequest = pending;
+    this.#notify();
+    const deadline = timer(() => decide(null), SITE_APPROVAL_MS);
+    try {
+      const allowed = await this.#awaitContext(context, () => answer);
+      if (allowed === null) fail('SITE_APPROVAL_TIMEOUT', 'Abrí el panel de mbrowser y volvé a pedir la página para autorizarla.');
+      if (!allowed) fail('SITE_APPROVAL_DENIED', 'El usuario rechazó el acceso a este sitio.');
+    } finally {
+      clearTimeout(deadline);
+      if (this.#siteRequest === pending) {
+        this.#siteRequest = null;
+        this.#notify();
+      }
+    }
+  }
+
+  async #decideSite({ id, allow }) {
+    const pending = this.#siteRequest;
+    if (!pending || id !== pending.id || typeof allow !== 'boolean' || !this.#welcomed) {
+      fail('STALE_SETTINGS', 'Esta solicitud ya no está activa.');
+    }
+    if (allow) {
+      const epoch = this.#epoch;
+      const grant = { ...this.#device.grant, allowedOrigins: [...this.#device.grant.allowedOrigins, pending.origin] };
+      const device = { ...this.#device, grant };
+      await this.#saveDevice(device);
+      if (epoch !== this.#epoch || this.#siteRequest !== pending) {
+        await this.#saveDevice();
+        fail('STALE_SETTINGS', 'Esta solicitud ya no está activa.');
+      }
+      this.#device = device;
+      this.#revision++;
+      this.#sendPermissions();
+    }
+    pending.decide(allow);
   }
 
   async #execute(method, params, context) {
@@ -963,7 +1094,9 @@ export class BackgroundController {
     if (params.visible !== undefined && typeof params.visible !== 'boolean') fail('INVALID_ARGUMENT', 'La visibilidad debe ser un valor booleano.');
     if (params.visible === true) fail('BACKGROUND_ONLY', 'mbrowser abre pestañas en segundo plano. Usa el panel de actividad para verlas.');
     const url = normalizeWebUrl(params.url);
-    if (!isAllowedUrl(url, this.#device.grant.allowedOrigins)) fail('ORIGIN_NOT_ALLOWED', 'Ese sitio no forma parte del alcance autorizado.');
+    await this.#awaitSiteApproval(url, context);
+    this.#assertContext(context);
+    if (!isAllowedUrl(url, this.#device.grant.allowedOrigins)) fail('ORIGIN_NOT_ALLOWED', 'Ese sitio no está autorizado.');
     context.navigation = true;
     let createdId = null;
     const creation = this.#chrome.tabs.create({ url, active: false }).then(async tab => {

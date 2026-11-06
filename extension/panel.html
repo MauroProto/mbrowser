@@ -3,51 +3,44 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="color-scheme" content="light">
-  <title>mbrowser · Actividad</title>
+  <meta name="color-scheme" content="light dark">
+  <title>mbrowser</title>
   <link rel="stylesheet" href="styles.css">
   <script type="module" src="panel.js"></script>
 </head>
 <body class="activity-panel">
-  <header class="brand compact">
+  <header class="brand">
     <img src="icons/icon-48.png" width="36" height="36" alt="">
-    <div><h1>mbrowser</h1><p>Actividad del agente</p></div>
-    <span class="local-tag">LOCAL</span>
+    <h1>mbrowser</h1>
   </header>
   <main>
-    <section class="status-card" aria-label="Estado de la conexión">
-      <div class="status-line"><span id="status-dot" class="status-dot"></span><h2 id="status-title">Comprobando estado…</h2></div>
+    <section class="status-card" aria-live="polite">
+      <div class="status-line"><span id="status-dot" class="status-dot"></span><h2 id="status-title">Comprobando conexión…</h2></div>
       <p id="status-detail"></p>
     </section>
     <p id="notice" class="notice" hidden></p>
-    <div class="panel-actions">
-      <button type="button" id="pause" class="button primary" hidden>Pausar</button>
-      <button type="button" id="resume" class="button primary" hidden>Reanudar</button>
-      <button type="button" id="settings" class="button secondary">Permisos</button>
+    <div class="actions" id="controls" hidden>
+      <button type="button" id="pause" class="button secondary" hidden>Desactivar</button>
+      <button type="button" id="resume" class="button primary" hidden>Activar</button>
+      <button type="button" id="revoke" class="button quiet" hidden>Desconectar</button>
     </div>
     <p id="feedback" class="feedback" role="status" hidden></p>
-    <section class="panel-section" aria-labelledby="tabs-title">
+    <section class="site-request" id="site-request" aria-labelledby="site-title" hidden>
+      <h2 id="site-title">Permitir este sitio</h2>
+      <p id="site-origin" class="site-origin"></p>
+      <p>El agente podrá leer e interactuar en sus pestañas de este sitio.</p>
+      <div class="actions">
+        <button type="button" id="allow-site" class="button primary">Permitir</button>
+        <button type="button" id="deny-site" class="button secondary">Rechazar</button>
+      </div>
+    </section>
+    <section class="activity" id="activity" aria-labelledby="tabs-title" hidden>
       <h2 id="tabs-title">Pestañas del agente</h2>
-      <p id="empty" class="help">Las pestañas aparecen cuando el agente empieza a trabajar.</p>
+      <p id="empty">Todavía no hay actividad.</p>
       <ul id="activity-tabs" class="activity-tabs"></ul>
+      <p id="preview-state" role="status" hidden></p>
+      <canvas id="preview-frame" aria-label="Pestaña y cursor del agente" hidden></canvas>
     </section>
-    <section class="panel-section" aria-labelledby="preview-title">
-      <h2 id="preview-title">Vista previa local</h2>
-      <p id="preview-help" class="help">Muestra una pestaña creada por mbrowser y su cursor. Las imágenes pueden contener datos de la página y se muestran solo en este panel.</p>
-      <label for="preview-tab">Pestaña</label>
-      <select id="preview-tab" aria-describedby="preview-help" disabled></select>
-      <button type="button" id="toggle-preview" class="button secondary" aria-pressed="false" disabled>Ver vista previa</button>
-      <p id="preview-state" class="help" role="status" hidden></p>
-      <canvas id="preview-frame" aria-label="Vista previa de la pestaña automatizada" hidden></canvas>
-    </section>
-    <button type="button" id="revoke" class="text-button danger" hidden>Revocar autorización…</button>
   </main>
-  <dialog id="revoke-dialog" class="confirm-dialog">
-    <form method="dialog">
-      <h2>¿Revocar el acceso?</h2>
-      <p>Se detendrá el control. Para volver a conectar, pide un código nuevo a Harness.</p>
-      <div class="dialog-actions"><button value="cancel" class="button secondary">Cancelar</button><button value="revoke" class="button danger-button">Revocar acceso</button></div>
-    </form>
-  </dialog>
 </body>
 </html>

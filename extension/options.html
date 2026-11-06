@@ -3,92 +3,22 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="color-scheme" content="light">
-  <title>mbrowser · Autorización y privacidad</title>
+  <meta name="color-scheme" content="light dark">
+  <title>Conectar mbrowser</title>
   <link rel="stylesheet" href="styles.css">
   <script type="module" src="options.js"></script>
 </head>
-<body class="options">
-  <header class="topbar">
-    <div class="brand"><img src="icons/icon-48.png" width="40" height="40" alt=""><div><p class="brand-title">mbrowser</p><p>Autorización y privacidad</p></div></div>
-    <span class="local-tag">EXTENSIÓN LOCAL</span>
-  </header>
-  <main class="options-shell">
-    <section class="hero">
-      <p class="eyebrow">CONTIGO AL MANDO</p>
-      <h1>Tu navegador.<br><span>Tus límites.</span></h1>
-      <p class="hero-copy">Conecta DeepSeek Harness con tu Chrome y sus sesiones abiertas. Tú eliges qué sitios puede usar, cuándo se pausa y cuándo termina el acceso.</p>
-      <div class="hero-points"><span>Sin scripts de contenido</span><span>Autorización persistente</span><span>Pestañas en segundo plano</span></div>
+<body class="setup-page">
+  <main class="setup">
+    <img src="icons/icon-48.png" width="48" height="48" alt="">
+    <h1>mbrowser</h1>
+    <section class="status-card" aria-live="polite">
+      <div class="status-line"><span id="status-dot" class="status-dot"></span><h2 id="status-title">Comprobando conexión…</h2></div>
+      <p id="status-detail"></p>
     </section>
-    <section class="connection-strip" aria-label="Estado de la conexión">
-      <div class="connection-copy"><div class="status-line"><span class="status-dot" id="status-dot"></span><h2 id="status-title">Comprobando estado…</h2></div><p id="status-detail">Consultando la extensión local.</p></div>
-      <div class="connection-actions"><button type="button" id="pause" class="button secondary" hidden>Pausar control</button><button type="button" id="resume" class="button primary" hidden>Reanudar</button><button type="button" id="revoke" class="text-button danger" hidden>Revocar acceso…</button></div>
-    </section>
-    <p id="notice" class="notice wide-notice" hidden></p>
-    <p id="feedback" class="feedback wide-feedback" role="status" aria-live="polite" hidden></p>
-    <div class="settings-grid">
-      <form id="setup-form" class="setup-stack" novalidate>
-        <section class="card">
-          <div class="card-heading"><span class="step">01</span><div><h2>Elige el alcance</h2><p>Empieza por lo necesario. Puedes cambiarlo más adelante.</p></div></div>
-          <fieldset class="scope-fieldset">
-            <legend>Sitios autorizados</legend>
-            <label class="choice"><input type="radio" name="scope" value="exact" checked><span><strong>Solo estos sitios</strong><span>Orígenes exactos, sin rutas ni comodines.</span></span><span class="recommended">RECOMENDADO</span></label>
-            <div id="origins-field" class="origins-field"><label for="origins">Una dirección por línea</label><textarea id="origins" aria-describedby="origins-help origins-error" rows="4" maxlength="12000" spellcheck="false" autocomplete="off" placeholder="https://ejemplo.com&#10;https://app.ejemplo.com"></textarea><p id="origins-help" class="help">Escribe al menos una dirección, por ejemplo https://example.com. Incluye el protocolo y el puerto si lo hay.</p><p id="origins-error" class="field-error" hidden></p></div>
-            <label class="choice"><input type="radio" name="scope" value="all"><span><strong>Todos los sitios web</strong><span>Permitir cualquier origen http o https (alcance «*»).</span></span></label>
-            <p id="all-origins-warning" class="inline-warning" hidden>Es un permiso amplio: la automatización podrá actuar en cualquier sitio web autorizado por el alcance de pestañas que elijas abajo. No incluye páginas internas de Chrome.</p>
-          </fieldset>
-          <div class="divider"></div>
-          <h3>Pestañas que puede usar</h3>
-          <div class="own-default"><span class="checkmark" aria-hidden="true">✓</span><div><strong>Las que cree mbrowser</strong><p>Se abren en segundo plano. Cuando seleccionas una pestaña, mbrowser te cede el control.</p></div></div>
-          <label class="checkbox-row existing-choice"><input type="checkbox" id="allow-existing"><span><strong>Permitir también las pestañas que yo haya abierto</strong><span>Opcional. Permite trabajar en tus pestañas de los sitios autorizados cuando están en segundo plano. Tú decides cuándo volver a seleccionarlas.</span></span></label>
-        </section>
-        <section class="consent-card">
-          <p class="eyebrow">AUTORIZACIÓN EXPLÍCITA</p>
-          <label class="checkbox-row consent-row"><input type="checkbox" id="consent"><span><strong>He revisado este alcance y autorizo el control.</strong><span>mbrowser podrá leer páginas, hacer clic e introducir texto en las pestañas autorizadas. Las acciones pueden tener efectos reales en mis cuentas.</span></span></label>
-          <p class="help">La autorización se recuerda en este perfil de Chrome hasta que la pauses, la cambies o la revoques. No se pedirá un código por cada acción.</p>
-          <button type="button" id="apply-permissions" class="button primary" hidden disabled>Guardar alcance y conectar</button>
-        </section>
-        <section class="card pairing-card">
-          <details id="pairing-details" open>
-            <summary><span class="step">02</span><span><strong>Vincular con Harness</strong><span id="pairing-summary">Necesitas un código solo la primera vez.</span></span><span class="summary-chevron" aria-hidden="true">⌄</span></summary>
-            <div class="pairing-content">
-              <ol class="setup-instructions"><li>Abre Harness y pide un <strong>código de vinculación de mbrowser</strong>.</li><li>Cópialo aquí. Es de un solo uso y caduca a los 10 minutos.</li><li>Revisa el alcance y marca la autorización de arriba antes de conectar.</li></ol>
-              <label for="pair-code">Código de vinculación</label>
-              <input id="pair-code" class="code-input" type="text" inputmode="text" maxlength="64" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX-…" aria-describedby="code-help pair-code-error">
-              <p id="pair-code-error" class="field-error" hidden></p>
-              <p class="help" id="code-help">El código no se guarda ni aparece en el estado de la extensión. Volver a vincular reemplaza la conexión anterior.</p>
-              <div class="port-row"><div><label for="bridge-port">Puerto local de Harness</label><input id="bridge-port" type="text" inputmode="numeric" pattern="[0-9]{4,5}" maxlength="5" autocomplete="off" value="43127" aria-describedby="bridge-port-error"><p id="bridge-port-error" class="field-error" hidden></p></div><p>Solo <code>127.0.0.1</code><br>Sin servidores remotos ni direcciones personalizadas.</p></div>
-              <button type="submit" id="pair-button" class="button primary" disabled>Autorizar y conectar</button>
-              <p class="help privacy-line">Las credenciales de conexión se guardan en el almacenamiento local de confianza de Chrome. Nunca se muestran en este panel ni se envían a los sitios web.</p>
-            </div>
-          </details>
-        </section>
-      </form>
-      <aside class="side-stack">
-        <section class="card reassurance-card">
-          <span class="shield-mark" aria-hidden="true">✓</span>
-          <h2>El control no es invisible.</h2>
-          <p>Chrome muestra su aviso de depuración cuando mbrowser se conecta a una pestaña. Es una protección del navegador: <strong>no se puede ni se debe ocultar</strong>.</p>
-          <p>Si cancelas ese aviso o desconectas la depuración, mbrowser se pausa. No intentará volver a conectarse a escondidas; tendrás que reanudarlo tú.</p>
-        </section>
-        <section class="card explain-card">
-          <h2>¿Qué cambia al pausar?</h2>
-          <p>Se rechazan nuevas órdenes y se liberan las conexiones de depuración. Se intenta cancelar el trabajo en curso, pero una acción ya enviada no se puede deshacer.</p>
-          <h3>¿Y al revocar?</h3>
-          <p>Se borra el permiso activo y se invalida la credencial en Harness. Si Harness no está disponible, se bloquea el acceso local de inmediato y se reintenta únicamente la revocación.</p>
-          <p><strong>Tus pestañas permanecen abiertas.</strong> No hay capturas automáticas ni una transmisión de video.</p>
-        </section>
-        <section class="technical-note">
-          <p class="eyebrow">UNA CONEXIÓN LOCAL</p>
-          <p>Sin cambiar opciones de seguridad de Chrome ni activar depuración remota. Esta extensión usa <code>chrome.debugger</code> y un WebSocket autenticado de bucle local.</p>
-          <p class="help">No elimina la confirmación inicial de instalación de Chrome. La configuración no instala nada por su cuenta.</p>
-        </section>
-      </aside>
-    </div>
-    <footer class="options-footer"><span>mbrowser · Tu autorización, siempre a mano.</span><span>ID de extensión: <code id="extension-id">—</code></span></footer>
+    <p id="notice" class="notice" hidden></p>
+    <p id="feedback" class="feedback" role="status" hidden></p>
+    <button type="button" id="show-panel" class="button primary" hidden>Abrir panel</button>
   </main>
-  <dialog id="revoke-dialog" class="confirm-dialog">
-    <form method="dialog"><p class="eyebrow">TÚ DECIDES</p><h2>¿Revocar la autorización?</h2><p>Se detendrá el control, se liberará la depuración y se invalidará la conexión. Tus pestañas no se cerrarán. Para volver a autorizar necesitarás un código nuevo de Harness.</p><div class="dialog-actions"><button value="cancel" class="button secondary">Cancelar</button><button value="revoke" class="button danger-button">Revocar acceso</button></div></form>
-  </dialog>
 </body>
 </html>

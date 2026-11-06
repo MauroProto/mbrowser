@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import http from 'node:http';
 import { once } from 'node:events';
-import { isAbsolute } from 'node:path';
 import { Config, parseConfig, apply, createRunner, createToolDefinitions, inject, name } from '../host-v2.js';
+import { createLinkCommand } from '../lib/link-chrome.js';
 import { MemoryCredentials, deferred } from './helpers/credentials.js';
 import { requestHttp } from './helpers/http.js';
 
@@ -16,7 +16,7 @@ function runner(overrides = {}) {
 
 /** Inspected Service-shaped doubles; NOT an installed Cordis/runtime integration. */
 function hostContext({ failRegistration = -1, failDomain = false } = {}) {
-  const definitions = new Map(); const events = []; const specs = []; const disposers = [];
+  const definitions = new Map(); const commands = new Map(); const events = []; const specs = []; const disposers = [];
   let value; let globalSchema; let closed = false; let registrationIndex = 0;
   const domain = {
     global: { get() { assert.equal(closed, false); return value; }, async set(next) {
@@ -44,6 +44,10 @@ function hostContext({ failRegistration = -1, failDomain = false } = {}) {
       assert.equal(definitions.has(definition.name), false); definitions.set(definition.name, definition); events.push(`register:${definition.name}`);
       return () => { assert.ok(definitions.delete(definition.name)); events.push(`unregister:${definition.name}`); };
     } },
+    commands: { register(definition) {
+      commands.set(definition.name, definition);
+      return () => commands.delete(definition.name);
+    } },
     get(service) { assert.equal(service, 'sandboxPolicy'); return undefined; },
     async effect(factory, label) {
       events.push(`effect:${label}`);
@@ -51,7 +55,7 @@ function hostContext({ failRegistration = -1, failDomain = false } = {}) {
       catch (error) { await dispose(); throw error; }
     },
   };
-  return { ctx, definitions, events, specs, domain, dispose, get closed() { return closed; } };
+  return { ctx, definitions, commands, events, specs, domain, dispose, get closed() { return closed; } };
 }
 async function listeningServer(t) {
   const server = http.createServer((_req, res) => res.end('fixture owner remains present'));
@@ -66,7 +70,7 @@ async function unusedPort() {
 
 test('Host exports the intended hard dependencies and bounded extension-only configuration', () => {
   assert.equal(name, 'mbrowser');
-  assert.deepEqual(inject, ['tools', 'credentials', 'storageDomain']);
+  assert.deepEqual(inject, ['tools', 'credentials', 'storageDomain', 'commands']);
   assert.equal(typeof Config, 'function', 'Cordis configuration must be a native callable Schemastery schema');
   assert.deepEqual(Config(), { port: 43127, overlay: true });
   assert.deepEqual(Config({}), { port: 43127, overlay: true });
@@ -95,7 +99,7 @@ test('pure tool definitions have exact action/schema forwarding, bounded outputs
     for (const key of definition.parameters.required || []) assert.ok(Object.hasOwn(definition.parameters.properties, key));
     assert.equal(definition.output.schema.type, 'object');
     assert.equal(definition.isConcurrencySafe({}), false);
-    assert.equal(definition.timeoutMs, definition.name === 'mbrowser_wait' ? 70000 : 35000);
+    assert.equal(definition.timeoutMs, ['mbrowser_wait', 'mbrowser_open'].includes(definition.name) ? 70000 : 35000);
     assert.deepEqual(JSON.parse(definition.output.render({}, { ok: true })[0].text), { ok: true });
     await definition.execute(undefined, exec);
     assert.deepEqual(calls.at(-1), [definition.name.slice('mbrowser_'.length), {}, exec]);
@@ -107,19 +111,37 @@ test('pure tool definitions have exact action/schema forwarding, bounded outputs
   assert.deepEqual(byName.get('mbrowser_type').parameters.required, ['selector', 'text']);
 });
 
-test('runner status explains extension setup without generating a pairing code unless explicitly requested', async () => {
+test('runner status directs the user to the human command and never generates or returns a code', async () => {
   const { run, calls } = runner();
   const first = await run('status');
-  assert.equal(first.backend, 'extension'); assert.equal(first.version, '3.0.0'); assert.equal(first.state_persisted, true);
-  assert.ok(isAbsolute(first.extension_directory));
-  assert.ok(first.setup.some((line) => line.includes('GitHub Releases')));
+  assert.equal(first.backend, 'extension'); assert.equal(first.version, '3.1.0'); assert.equal(first.state_persisted, true);
+  assert.equal(first.extension_directory, undefined);
+  assert.ok(first.setup.some((line) => line.includes('/mbrowser')));
   assert.equal(first.pairing, undefined);
   assert.deepEqual(calls, [{ method: 'status' }]);
-  const second = await run('status', { pair: true });
-  assert.equal(typeof second.pairing.code, 'string');
-  assert.deepEqual(calls.slice(-2), [{ method: 'status' }, { method: 'pair' }]);
+  await assert.rejects(run('status', { pair: true }), { code: 'HUMAN_ACTION_REQUIRED' });
+  assert.deepEqual(calls, [{ method: 'status' }]);
   await run('status', { pair: 'true' });
   assert.equal(calls.at(-1).method, 'status');
+});
+
+test('the human command passes a one-use local link to Chrome and never logs its secret', async () => {
+  const code = 'ABCD-1234-ABCD-5678-0123-4567-89AB-CDEF';
+  let generated = 0;
+  let launched;
+  const bridge = { port: 43127, origin: 'http://127.0.0.1:43127', createPairingCode() { generated++; return { code }; } };
+  const command = createLinkCommand(bridge, url => { launched = url; });
+  assert.equal(command.recordInput, false);
+  assert.equal((await command.handler({ rawInput: 'https://example.com/' })).kind, 'error');
+  assert.equal((await command.handler({ rawInput: '', signal: AbortSignal.abort() })).kind, 'error');
+  assert.equal(generated, 0);
+  const result = await command.handler({ rawInput: '' });
+  assert.equal(result.kind, 'success');
+  assert.equal(launched, 'http://127.0.0.1:43127/mbrowser/connect#link=' + code.replaceAll('-', ''));
+  assert.ok(!JSON.stringify(result).includes(code.replaceAll('-', '')));
+  const failure = await createLinkCommand(bridge, url => { throw new Error(url); }).handler({ rawInput: '' });
+  assert.equal(failure.kind, 'error');
+  assert.ok(!JSON.stringify(failure).includes(code.replaceAll('-', '')));
 });
 
 test('runner uses the Agent ID rather than model arguments as the ownership scope', async () => {
@@ -146,12 +168,12 @@ test('runner propagates both caller and plugin-lifetime cancellation and checks 
   }
 });
 
-test('status cancellation while awaiting credentials prevents late pairing generation', async () => {
+test('status cancellation while awaiting credentials discards the late response', async () => {
   const started = deferred(); const release = deferred(); const controller = new AbortController();
   let generated = false;
   const bridge = { async status() { started.resolve(); await release.promise; return { connected: false }; }, createPairingCode() { generated = true; return { code: 'not-allowed-after-abort' }; } };
   const { run } = runner({ bridge });
-  const pending = assert.rejects(run('status', { pair: true }, { signal: controller.signal }), { code: 'ABORTED' });
+  const pending = assert.rejects(run('status', {}, { signal: controller.signal }), { code: 'ABORTED' });
   await started.promise; controller.abort(); release.resolve();
   await pending; assert.equal(generated, false);
 });
@@ -184,6 +206,7 @@ test('Host apply starts one real loopback bridge with Service doubles and tears 
   assert.equal(host.specs[0].global.schema.safeParse(null).success, false);
   assert.deepEqual(host.specs[0].tables, {});
   assert.equal(host.definitions.size, 12);
+  assert.equal(host.commands.get('mbrowser').name, 'mbrowser');
   const health = await requestHttp(`http://127.0.0.1:${port}`, { path: '/health' });
   assert.equal(health.status, 200);
   const statusTool = host.definitions.get('mbrowser_status');
@@ -193,6 +216,7 @@ test('Host apply starts one real loopback bridge with Service doubles and tears 
   assert.equal(error.code, 'DISCONNECTED', 'No extension connection must never fall back to direct CDP');
   await host.dispose();
   assert.equal(host.definitions.size, 0); assert.equal(host.closed, true);
+  assert.equal(host.commands.size, 0);
   assert.equal(host.events.at(-1), 'domain:close');
   assert.equal(host.events.filter((event) => event.startsWith('unregister:')).length, 12);
   await assert.rejects(requestHttp(`http://127.0.0.1:${port}`, { path: '/health' }));

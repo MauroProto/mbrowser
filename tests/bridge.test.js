@@ -97,14 +97,15 @@ test('bridge validates configuration and exact permission origins', () => {
   for (const key of ['heartbeatMs', 'commandTimeoutMs', 'pairingTtlMs', 'authTimeoutMs', 'maxPayload', 'maxCommandBytes', 'maxHttpBytes']) {
     assert.throws(() => new BrowserBridge({ credentials, [key]: 0 }), { code: 'INVALID_LIMIT' });
   }
-  for (const allowedOrigins of [[], ['file:///tmp'], ['https://example.test/'], ['https://example.test/path'], ['https://user:password@example.test'], ['null'], [123], Array(101).fill('*')]) {
+  assert.deepEqual(validatePermissions({ ...GRANT, allowedOrigins: [] }).allowedOrigins, []);
+  for (const allowedOrigins of [['*'], ['file:///tmp'], ['https://example.test/'], ['https://example.test/path'], ['https://user:password@example.test'], ['null'], [123], Array(101).fill('*')]) {
     assert.throws(() => validatePermissions({ ...GRANT, allowedOrigins }), { code: 'INVALID_PERMISSIONS' });
   }
   assert.throws(() => validatePermissions({ ...GRANT, enabled: 'true' }), { code: 'INVALID_PERMISSIONS' });
   const grant = validatePermissions({ ...GRANT, allowedOrigins: ['https://example.test', 'https://example.test'] });
   assert.deepEqual(grant.allowedOrigins, ['https://example.test']);
   assert.ok(Object.isFrozen(grant) && Object.isFrozen(grant.allowedOrigins));
-  assert.deepEqual(validatePermissions({ ...GRANT, allowedOrigins: ['https://example.test', '*'] }).allowedOrigins, ['*']);
+  assert.throws(() => validatePermissions({ ...GRANT, allowExistingTabs: true }), { code: 'INVALID_PERMISSIONS' });
 });
 
 test('bridge binds IPv4 loopback; health contains no browser or credential data', async (t) => {
@@ -125,6 +126,23 @@ test('bridge binds IPv4 loopback; health contains no browser or credential data'
   assert.deepEqual(credentials.keysRead.every((key) => key === CREDENTIAL_KEY), true);
   assert.equal((await bridge.status()).paired, true);
   assert.equal(bridge.origin, `http://127.0.0.1:${bridge.port}`);
+});
+
+test('the setup landing page has no secret, scripting or cross-site access', async (t) => {
+  const { bridge } = await setup(t);
+  const path = '/mbrowser/connect';
+  const headers = { 'sec-fetch-site': 'none', 'sec-fetch-mode': 'navigate', 'sec-fetch-dest': 'document' };
+  const pairing = bridge.createPairingCode();
+  const page = await requestHttp(bridge.origin, { path, headers });
+  assert.equal(page.status, 200);
+  assert.match(page.text, /name="mbrowser-connect" content="1"/);
+  assert.doesNotMatch(page.text, /<script/i);
+  assert.ok(!page.text.includes(pairing.code));
+  assert.equal(page.headers['referrer-policy'], 'no-referrer');
+  assert.equal(page.headers['cache-control'], 'no-store');
+  assert.match(page.headers['content-security-policy'], /frame-ancestors 'none'/);
+  assert.equal((await requestHttp(bridge.origin, { path })).status, 403);
+  assert.equal((await requestHttp(bridge.origin, { path, headers: { ...headers, 'sec-fetch-site': 'cross-site' } })).status, 403);
 });
 
 test('HTTP rejects unrelated Host and Origin without wildcard CORS or command endpoint', async (t) => {
@@ -374,9 +392,9 @@ test('pause immediately cancels pending work and rejects new commands; resume up
   assert.equal((await bridge.status()).paused, true);
   await assert.rejects(bridge.request('tabs'), { code: 'PAUSED' });
   const resumed = once(bridge, 'permissions');
-  client.sendJson({ type: 'permissions', permissions: { ...GRANT, allowExistingTabs: true, allowedOrigins: ['https://example.test'] } });
+  client.sendJson({ type: 'permissions', permissions: { ...GRANT, allowedOrigins: ['https://example.test'] } });
   await resumed;
-  assert.deepEqual(bridge.permissions, { enabled: true, allowExistingTabs: true, allowedOrigins: ['https://example.test'] });
+  assert.deepEqual(bridge.permissions, { enabled: true, allowExistingTabs: false, allowedOrigins: ['https://example.test'] });
   const request = bridge.request('tabs');
   const next = await nextCommand(client);
   client.sendJson({ type: 'result', id: next.id, ok: true, result: [] });

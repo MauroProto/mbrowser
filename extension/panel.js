@@ -1,9 +1,8 @@
-import { renderStatus, feedback, request, observeStatus, bindSafetyControls } from './ui.js';
+import { renderStatus, feedback, request, observeStatus } from './ui.js';
 
 const $ = id => document.getElementById(id);
-const select = $('preview-tab');
 const canvas = $('preview-frame');
-const toggle = $('toggle-preview');
+const activity = $('activity-tabs');
 const labels = {
   manual: 'Bajo tu control',
   working: 'Agente trabajando',
@@ -13,6 +12,8 @@ const labels = {
 let status;
 let watched = null;
 let refreshing = false;
+let lastTabs;
+let deciding;
 
 function clearFrame() {
   canvas.width = 0;
@@ -24,13 +25,21 @@ function stopPreview() {
   watched = null;
   clearFrame();
   $('preview-state').hidden = true;
-  toggle.textContent = 'Ver vista previa';
-  toggle.setAttribute('aria-pressed', 'false');
+  updatePreviewButtons();
 }
 
 function update(next) {
+  if (status && next.revision < status.revision) return;
   status = next;
   renderStatus(next);
+  $('controls').hidden = !next.paired;
+  $('pause').hidden = !next.enabled;
+  $('resume').hidden = next.enabled;
+  $('revoke').hidden = !next.paired;
+  $('site-request').hidden = !next.siteRequest;
+  $('site-origin').textContent = next.siteRequest?.origin || '';
+  $('allow-site').disabled = $('deny-site').disabled = deciding?.id === next.siteRequest?.id && Boolean(deciding);
+  $('activity').hidden = next.connection !== 'connected';
   if (next.connection !== 'connected') {
     stopPreview();
     showTabs([]);
@@ -38,29 +47,52 @@ function update(next) {
 }
 
 function showTabs(tabs) {
+  if (watched && !tabs.some(tab => tab.id === watched.id && tab.preview)) stopPreview();
+  const signature = JSON.stringify(tabs);
+  if (signature === lastTabs) return;
+  lastTabs = signature;
   $('empty').hidden = tabs.length > 0;
+  const focused = document.activeElement?.dataset.previewId;
   const rows = tabs.map(tab => {
     const row = document.createElement('li');
-    row.dataset.state = tab.state;
+    const text = document.createElement('div');
     const title = document.createElement('strong');
     title.textContent = tab.title || 'Sin título';
     const detail = document.createElement('span');
     detail.textContent = `${labels[tab.state]} · ${tab.origin}`;
-    row.append(title, detail);
+    text.append(title, detail);
+    row.append(text);
+    if (tab.preview) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'button secondary';
+      button.dataset.previewId = String(tab.id);
+      button.addEventListener('click', () => togglePreview(tab.id));
+      row.append(button);
+    }
     return row;
   });
-  $('activity-tabs').replaceChildren(...rows);
-  const eligible = tabs.filter(tab => tab.preview);
-  if (watched && !eligible.some(tab => tab.id === watched.id)) stopPreview();
-  const previous = select.value;
-  const signature = JSON.stringify(eligible.map(tab => [tab.id, tab.title, tab.origin]));
-  if (select.dataset.tabs !== signature) {
-    select.dataset.tabs = signature;
-    select.replaceChildren(...eligible.map(tab => new Option(tab.title || tab.origin, String(tab.id))));
-    if (eligible.some(tab => String(tab.id) === previous)) select.value = previous;
+  activity.replaceChildren(...rows);
+  updatePreviewButtons();
+  if (focused) [...activity.querySelectorAll('button')].find(button => button.dataset.previewId === focused)?.focus();
+}
+
+function updatePreviewButtons() {
+  for (const button of activity.querySelectorAll('button')) {
+    const shown = Number(button.dataset.previewId) === watched?.id;
+    button.textContent = shown ? 'Ocultar' : 'Ver';
+    button.setAttribute('aria-pressed', String(shown));
   }
-  select.disabled = eligible.length === 0;
-  toggle.disabled = eligible.length === 0;
+}
+
+function togglePreview(id) {
+  const alreadyWatching = watched?.id === id;
+  stopPreview();
+  if (alreadyWatching) return;
+  watched = { id };
+  updatePreviewButtons();
+  previewState('Cargando vista…');
+  void refresh();
 }
 
 function previewState(message) {
@@ -126,6 +158,9 @@ async function refresh() {
       previewState(preview.error?.message || 'Esperando una imagen de la pestaña…');
     } else if (preview.frame) {
       await draw(preview.frame, selection);
+    } else {
+      clearFrame();
+      previewState('Esperando actividad del agente…');
     }
   } catch {
     stopPreview();
@@ -135,29 +170,39 @@ async function refresh() {
   }
 }
 
-select.addEventListener('change', stopPreview);
-toggle.addEventListener('click', () => {
-  if (watched) {
-    stopPreview();
-  } else if (select.value) {
-    watched = { id: Number(select.value) };
-    toggle.textContent = 'Detener vista previa';
-    toggle.setAttribute('aria-pressed', 'true');
-    previewState('Esperando una imagen de la pestaña…');
-    void refresh();
-  }
-});
-
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) stopPreview();
   else void refresh();
 });
 
-$('settings').addEventListener('click', () => { void chrome.runtime.openOptionsPage(); });
-bindSafetyControls(() => status, update);
+async function control(message) {
+  const response = await request(message);
+  if (response.status) update(response.status);
+  feedback(response.ok ? '' : response.error.message, !response.ok);
+}
+
+async function decideSite(allow) {
+  const pending = status?.siteRequest;
+  if (!pending || deciding?.id === pending.id) return;
+  deciding = pending;
+  update(status);
+  try { await control({ action: 'decideSite', id: pending.id, allow }); }
+  finally {
+    if (deciding === pending) deciding = null;
+    update(status);
+  }
+}
+
+$('allow-site').addEventListener('click', () => { void decideSite(true); });
+$('deny-site').addEventListener('click', () => { void decideSite(false); });
+$('pause').addEventListener('click', () => { void control({ action: 'pause' }); });
+$('resume').addEventListener('click', () => {
+  if (status) void control({ action: 'resume', revision: status.revision, accepted: true });
+});
+$('revoke').addEventListener('click', () => { void control({ action: 'revoke', confirmed: true }); });
 observeStatus(update);
 const initial = await request({ action: 'getStatus' });
-if (initial.status) update(initial.status);
+if (!status && initial.status) update(initial.status);
 if (!initial.ok) feedback(initial.error.message, true);
 void refresh();
 setInterval(refresh, 800);

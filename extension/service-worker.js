@@ -3,8 +3,12 @@ import { BackgroundController } from './background.js';
 const controller = new BackgroundController();
 const ignore = promise => { Promise.resolve(promise).catch(() => {}); };
 
-// Deliberately no onMessageExternal, content scripts, page messaging, or remotely loaded code.
+// The one-way handoff is separate from the extension's trusted UI messages.
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
+  if (message?.action === 'handoff') {
+    ignore(controller.handleHandoff(message, sender));
+    return false;
+  }
   if (!controller.isUiSender(sender)) return false;
   controller.handleUi(message, sender).then(respond, () => respond({
     ok: false,
@@ -12,8 +16,12 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   }));
   return true;
 });
-chrome.runtime.onStartup.addListener(() => ignore(controller.handleStartup()));
-chrome.runtime.onInstalled.addListener(() => ignore(controller.handleStartup()));
+function start() {
+  ignore(chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }));
+  ignore(controller.handleStartup());
+}
+chrome.runtime.onStartup.addListener(start);
+chrome.runtime.onInstalled.addListener(start);
 chrome.alarms.onAlarm.addListener(alarm => ignore(controller.handleAlarm(alarm)));
 chrome.debugger.onDetach.addListener((source, reason) => ignore(controller.handleDebuggerDetach(source, reason)));
 chrome.tabs.onActivated.addListener(({ tabId }) => ignore(controller.handleTabActivated(tabId)));

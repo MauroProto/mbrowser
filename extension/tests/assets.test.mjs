@@ -18,7 +18,7 @@ test('original icons are real PNGs in every declared Chrome size', async () => {
 
 test('Spanish pages resolve all local assets, have unique IDs and no inline or remote active content', async () => {
   const common = await readFile(file('ui.js'), 'utf8');
-  for (const name of ['popup', 'options', 'panel']) {
+  for (const name of ['options', 'panel']) {
     const html = await readFile(file(`${name}.html`), 'utf8');
     const js = await readFile(file(`${name}.js`), 'utf8');
     assert.match(html, /<html lang="es">/);
@@ -38,7 +38,7 @@ test('Spanish pages resolve all local assets, have unique IDs and no inline or r
     assert.doesNotMatch(js + common, /\b(?:innerHTML|outerHTML|document\.write|eval|Function|localStorage|sessionStorage)\b/);
     assert.doesNotMatch(js + common, /\b(?:fetch|WebSocket)\s*\(/);
     assert.doesNotMatch(js + common, /chrome\.storage/);
-    for (const required of ['status-title', 'status-detail', 'status-dot', 'pause', 'resume', 'revoke', 'revoke-dialog', 'feedback', 'notice']) {
+    for (const required of ['status-title', 'status-detail', 'status-dot', 'feedback', 'notice']) {
       assert.ok(ids.includes(required), `${name} is missing #${required}`);
     }
   }
@@ -48,15 +48,12 @@ test('Spanish pages resolve all local assets, have unique IDs and no inline or r
   assert.match(css, /:focus-visible/);
 });
 
-test('initial form does not preapprove existing tabs, wildcard origins or consent', async () => {
+test('setup has no permission fields and the single panel confirms exact sites', async () => {
   const html = await readFile(file('options.html'), 'utf8');
-  assert.match(html, /name="scope" value="exact" checked/);
-  for (const id of ['allow-existing', 'consent']) {
-    const tag = html.match(new RegExp(`<input[^>]*id="${id}"[^>]*>`))?.[0];
-    assert.ok(tag);
-    assert.doesNotMatch(tag, /\bchecked\b/);
+  assert.doesNotMatch(html, /<(?:input|select|form|textarea)\b/);
+  const panel = await readFile(file('panel.html'), 'utf8');
+  assert.match(panel, /id="site-request"[^>]*hidden/);
+  for (const id of ['site-origin', 'allow-site', 'deny-site', 'pause', 'resume', 'revoke', 'preview-frame']) {
+    assert.ok(panel.includes('id="' + id + '"'));
   }
-  assert.match(html, /name="scope" value="all"/);
-  assert.match(html, /id="all-origins-warning"[^>]*hidden/);
-  assert.match(html, /no se puede ni se debe ocultar/);
 });

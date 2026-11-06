@@ -13,7 +13,7 @@ The suite uses Node's built-in test runner and local fixtures. It checks paired 
 
 The release bundle is produced by `npm pack --ignore-scripts`. It contains the Harness entry, runtime code, Chrome extension and their metadata. The separate ZIP contains the extension assets for **Load unpacked** in Chrome.
 
-To exercise the real path, install the tarball into a fresh Harness profile and load the extension in a disposable Chrome profile. Approve only an isolated fixture origin. Verify pairing, a background open, read and snapshot, native click and typing, CSSOM scroll, activity and preview, selected-tab protection, pause and signed revocation. Keep a separate foreground fixture open and check its focus and selection while the agent uses its background tab.
+To exercise the real path, install the tarball into a fresh Harness profile and load the extension in a disposable Chrome profile. Run `/mbrowser` and verify the link saves an empty grant while inactive. Activate from Chrome, ask Harness to open a local fixture and approve that exact site in the panel. The original open should complete in the background. Verify read, snapshot, native click and typing, CSSOM scroll, activity and preview, selected-tab protection, idle deactivation and signed revocation. Keep a separate foreground fixture open and check its focus and selection while the agent uses its background tab.
 
 ## Migración desde una instalación local de la versión 2
 
@@ -22,6 +22,10 @@ Si Harness muestra que la clave `mbrowser:extension:device:v1` debe seguir el fo
 ## Native verification for 3.0.0
 
 A clean Windows test used DeepSeek Harness 0.2.2-rc.1 and Chrome 156. It installed the packaged bundle, loaded the extension in a disposable browser profile, paired from the options form and verified read, snapshot, click, typing and scroll. A separate selected tab kept its focus and text selection. A link that requested a new window was blocked. The local preview rendered the browser tab and pointer. Selecting the automated tab blocked control and closure. Restarting Harness restored the grant, and pause, resume and authenticated revoke all passed.
+
+## Native verification for 3.1.0
+
+The packaged build was installed in an isolated Harness profile on Windows. A disposable Chrome profile opened the registered human command's loopback URL and linked with control disabled. After activation, one site approval completed the original background open. The local fixture verified read, click, typing, scroll, foreground selection and the preview pointer. A public YouTube search loaded in a separate background tab. Idle expiry disconnected control while leaving tabs open. The run also verified denial, manual deactivation, reactivation, reconnect during an active window and authenticated disconnect.
 
 ## Optional native CDP fixture tests
 

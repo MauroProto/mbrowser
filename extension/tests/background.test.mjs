@@ -56,7 +56,13 @@ function persisted({ enabled = true, existing = false, origins = [ORIGIN] } = {}
   };
 }
 
-function harness({ device, session, fetchImpl, fetchHook, createHook, attachHook, cdpHook, storageHook } = {}) {
+function harness({
+  device = persisted(), now = Date.now,
+  session = device?.grant.enabled ? {
+    schema: 1, instanceId: '99999999-0000-0000-0000-111111111111', activeUntil: now() + 120_000,
+  } : null,
+  fetchImpl, fetchHook, createHook, attachHook, cdpHook, storageHook,
+} = {}) {
   const local = device ? { [LOCAL]: clone(device) } : {};
   const sessionData = session ? { [SESSION]: clone(session) } : {};
   const instances = [];
@@ -81,6 +87,7 @@ function harness({ device, session, fetchImpl, fetchHook, createHook, attachHook
   const chrome = {
     runtime: {
       id: ID,
+      getURL: path => 'chrome-extension://' + ID + '/' + path,
       async sendMessage(message) { calls.broadcasts.push(clone(message)); },
     },
     action: { async setBadgeText() {}, async setBadgeBackgroundColor() {} },
@@ -94,6 +101,10 @@ function harness({ device, session, fetchImpl, fetchHook, createHook, attachHook
       async query() { return [...tabs.values()].map(clone); },
       async get(id) {
         if (!tabs.has(id)) throw new Error('No tab with given id');
+        return clone(tabs.get(id));
+      },
+      async update(id, options) {
+        Object.assign(tabs.get(id), options);
         return clone(tabs.get(id));
       },
       async create(options) {
@@ -168,7 +179,7 @@ function harness({ device, session, fetchImpl, fetchHook, createHook, attachHook
     if (fetchHook) return await fetchHook(url, options, reply);
     return reply();
   };
-  const controller = new BackgroundController({ chrome, fetch: fetchImpl ?? fetch, WebSocket: Socket });
+  const controller = new BackgroundController({ chrome, fetch: fetchImpl ?? fetch, WebSocket: Socket, now });
   chrome.tabs.onUpdated.addListener((...args) => controller.handleTabUpdated(...args));
   chrome.tabs.onActivated.addListener(({ tabId }) => controller.handleTabActivated(tabId));
   chrome.tabs.onRemoved.addListener((...args) => controller.handleTabRemoved(...args));
@@ -178,16 +189,27 @@ function harness({ device, session, fetchImpl, fetchHook, createHook, attachHook
   async function ui(action, extras = {}) {
     return await controller.handleUi({ action, ...extras }, sender);
   }
-  async function pair({ origins = [ORIGIN], existing = false, accepted = true, port = 43127 } = {}) {
+  async function pair({ code = CODE, port = 43127, beforeConsume } = {}) {
     await controller.ready;
-    return await ui('pair', {
-      revision: controller.status().revision, port, code: CODE,
-      consent: { accepted, allowExistingTabs: existing, allowedOrigins: origins },
-    });
+    const origin = 'http://127.0.0.1:' + port;
+    const url = origin + '/mbrowser/connect';
+    const tab = { id: 4, url, incognito: false };
+    tabs.set(tab.id, tab);
+    try { await controller.handleHandoff({ code: code.replaceAll('-', '') }, { id: ID, tab, frameId: 0, origin, url }); }
+    catch (error) { return { ok: false, error: { code: error.code } }; }
+    assert.equal(tabs.get(tab.id).url, sender.url);
+    await beforeConsume?.();
+    return controller.handleUi({ action: 'consumeLink' }, { ...sender, tab });
+  }
+  async function decideSite(allow, id = controller.status().siteRequest?.id) {
+    return controller.handleUi({ action: 'decideSite', id, allow }, { ...sender, url: chrome.runtime.getURL('panel.html') });
   }
   async function connected() {
     await controller.ready;
-    if (!instances.length) assert.equal((await pair()).ok, true);
+    if (!controller.status().paired) assert.equal((await pair()).ok, true);
+    if (!instances.length) {
+      assert.equal((await ui('resume', { revision: controller.status().revision, accepted: true })).ok, true);
+    }
     const socket = instances.at(-1);
     socket.open();
     const { nonce: clientNonce } = socket.sent.at(-1);
@@ -236,18 +258,18 @@ function harness({ device, session, fetchImpl, fetchHook, createHook, attachHook
     assert.equal(result.ok, true, JSON.stringify(result));
     return result.result.executionContextId;
   }
-  return { controller, chrome, local, sessionData, calls, alarms, tabs, attached, instances, sender, ui, pair, connected, command, cdp, own, world };
+  return { controller, chrome, local, sessionData, calls, alarms, tabs, attached, instances, sender, ui, pair, decideSite, connected, command, cdp, own, world };
 }
 
 const evaluation = contextId => ({ expression: 'document.title', contextId, awaitPromise: true, returnByValue: true, userGesture: false, timeout: 1000 });
 
-test('no network before first explicit consent; trusted sender only; safe status', async () => {
-  const h = harness();
+test('no network before receiving a link; trusted sender only; safe empty grant', async () => {
+  const h = harness({ device: null });
   await h.controller.ready;
   assert.equal(h.instances.length, 0);
   assert.equal(h.calls.fetch.length, 0);
   assert.deepEqual(h.calls.access, [['local', 'TRUSTED_CONTEXTS'], ['session', 'TRUSTED_CONTEXTS']]);
-  assert.equal((await h.pair({ accepted: false })).error.code, 'CONSENT_REQUIRED');
+  assert.equal((await h.pair({ code: 'invalid' })).error.code, 'INVALID_PAIR_CODE');
   assert.equal(h.calls.fetch.length, 0);
   for (const sender of [
     { id: ID, url: 'https://allowed.example/', origin: 'https://allowed.example' },
@@ -259,14 +281,19 @@ test('no network before first explicit consent; trusted sender only; safe status
     assert.equal(response.error.code, 'UNTRUSTED_SENDER');
     assert.equal(response.status, undefined);
   }
-  assert.equal((await h.pair()).ok, true);
+  assert.equal((await h.pair({ beforeConsume: async () => {
+    assert.equal((await h.ui('consumeLink')).status.paired, false);
+    assert.equal(h.calls.fetch.length, 0, 'another tab cannot consume the handoff');
+  } })).ok, true);
+  assert.equal(h.controller.status().enabled, false);
+  assert.equal(h.instances.length, 0);
   const response = await h.ui('getStatus');
   const key = h.local[LOCAL].token;
   assert.equal(JSON.stringify(response).includes(key), false);
   assert.equal(JSON.stringify(h.calls.broadcasts).includes(key), false);
   assert.equal(JSON.stringify(response).includes(CODE), false);
   assert.equal(h.local[LOCAL].grant.allowExistingTabs, false);
-  assert.deepEqual(h.local[LOCAL].grant.allowedOrigins, [ORIGIN]);
+  assert.deepEqual(h.local[LOCAL].grant.allowedOrigins, []);
   const { url, options } = h.calls.fetch[0];
   assert.equal(url, 'http://127.0.0.1:43127/pair');
   assert.equal(options.redirect, 'error');
@@ -274,13 +301,13 @@ test('no network before first explicit consent; trusted sender only; safe status
   assert.equal(h.local[LOCAL].token, pairedKey(url, options));
   assert.deepEqual(Object.keys(JSON.parse(options.body)).sort(), ['nonce', 'proof']);
   assert.ok(!options.body.includes(RAW_CODE));
-  assert.equal((await h.ui('pair', { revision: h.controller.status().revision, port: 43127, code: CODE, consent: {}, bridgeUrl: 'http://evil.test' })).error.code, 'INVALID_ARGUMENT');
+  assert.equal((await h.ui('consumeLink', { code: CODE, bridgeUrl: 'http://evil.test' })).error.code, 'INVALID_ARGUMENT');
 });
 
 test('native fetch callbacks receive no controller receiver during pairing or revocation', async () => {
   const requests = [];
   let key;
-  const h = harness({ fetchImpl: async function (url, options) {
+  const h = harness({ device: null, fetchImpl: async function (url, options) {
     // Arrow functions and Node's fetch hide the native WebIDL receiver requirement.
     if (this !== undefined) throw new TypeError('Illegal invocation');
     requests.push({ url, options });
@@ -351,7 +378,7 @@ test('an unverified local listener cannot receive a saved grant or send a comman
 
 test('an unsigned pairing reply or revocation acknowledgement is rejected', async () => {
   const fake = async () => new Response(JSON.stringify({ ok: true, protocol: PROTOCOL, nonce: newNonce(), proof: '0'.repeat(64) }));
-  const unpaired = harness({ fetchHook: fake });
+  const unpaired = harness({ device: null, fetchHook: fake });
   assert.equal((await unpaired.pair()).error.code, 'PAIRING_PROTOCOL');
   assert.equal(unpaired.instances.length, 0);
   const paired = harness({ device: persisted(), fetchHook: fake });
@@ -366,7 +393,10 @@ test('default owns-only hides all user tabs; open is inactive and close never to
   const h = harness();
   const socket = await h.connected();
   assert.deepEqual((await h.command(socket, 'tabs')).result, []);
-  assert.equal((await h.command(socket, 'open', { url: 'https://forbidden.example/' })).error.code, 'ORIGIN_NOT_ALLOWED');
+  const denied = h.command(socket, 'open', { url: 'https://forbidden.example/' });
+  assert.equal(h.controller.status().siteRequest.origin, 'https://forbidden.example');
+  assert.equal((await h.decideSite(false)).ok, true);
+  assert.equal((await denied).error.code, 'SITE_APPROVAL_DENIED');
   assert.equal(h.calls.create.length, 0);
   const id = await h.own(socket);
   assert.equal(h.calls.create[0].active, false);
@@ -378,19 +408,20 @@ test('default owns-only hides all user tabs; open is inactive and close never to
   assert.equal(h.controller.status().ownedTabCount, 0);
 });
 
-test('optional existing tabs remain origin-filtered and cannot be closed', async () => {
+test('upgrade keeps exact sites while removing pre-existing tabs and wildcard grants', async () => {
   const h = harness({ device: persisted({ existing: true }) });
   const socket = await h.connected();
   assert.deepEqual((await h.command(socket, 'tabs')).result, []);
-  assert.equal((await h.cdp(socket, 1, 'Page.enable')).error.code, 'TAB_IN_USE');
   h.tabs.get(1).active = false;
   const list = await h.command(socket, 'tabs');
-  assert.deepEqual(list.result.map(tab => ({ id: tab.id, owned: tab.owned })), [{ id: 'ext:1', owned: false }]);
-  assert.equal(JSON.stringify(list).includes('FORBIDDEN PRIVATE TITLE'), false);
-  assert.equal((await h.cdp(socket, 1, 'Page.enable')).ok, true);
-  assert.equal((await h.cdp(socket, 2, 'Page.enable')).error.code, 'ORIGIN_NOT_ALLOWED');
+  assert.deepEqual(list.result, []);
+  assert.equal((await h.cdp(socket, 1, 'Page.enable')).error.code, 'EXISTING_TAB_DENIED');
   assert.equal((await h.command(socket, 'close', { tab_id: 'ext:1' })).error.code, 'TAB_NOT_OWNED');
   assert.equal(h.calls.remove.length, 0);
+  assert.deepEqual(h.local[LOCAL].grant, { enabled: true, allowExistingTabs: false, allowedOrigins: [ORIGIN] });
+  const broad = harness({ device: persisted({ existing: true, origins: ['*'] }) });
+  await broad.controller.ready;
+  assert.deepEqual(broad.local[LOCAL].grant, { enabled: true, allowExistingTabs: false, allowedOrigins: [] });
 });
 
 test('focus emulation uses the same ownership/origin grant without activating any tab', async () => {
@@ -581,22 +612,50 @@ test('unexpected user debugger detach pauses globally without a reattach loop', 
   assert.equal(h.calls.attach.length, 1);
 });
 
-test('permission changes notify immediately, cancel old work, and require fresh review', async () => {
+test('an exact site approval continues the original background open and does not release existing tabs', async () => {
   const h = harness();
   const socket = await h.connected();
   const id = await h.own(socket);
   await h.cdp(socket, id, 'Page.enable');
-  const current = h.controller.status().revision;
-  const rejected = await h.ui('updatePermissions', { revision: current, consent: { accepted: false, allowExistingTabs: true, allowedOrigins: ['*'] } });
-  assert.equal(rejected.error.code, 'CONSENT_REQUIRED');
-  assert.equal(h.controller.status().permissions.allowExistingTabs, false);
-  const result = await h.ui('updatePermissions', { revision: current, consent: { accepted: true, allowExistingTabs: true, allowedOrigins: ['*'] } });
-  assert.equal(result.ok, true);
-  assert.ok(socket.sent.some(frame => frame.type === 'permissions' && frame.permissions.allowExistingTabs && frame.permissions.allowedOrigins[0] === '*'));
-  assert.equal(h.attached.size, 0);
-  assert.deepEqual(h.local[LOCAL].grant, { enabled: true, allowExistingTabs: true, allowedOrigins: ['*'] });
-  const broad = await h.connected();
-  assert.deepEqual((await h.command(broad, 'tabs')).result.map(tab => tab.id), ['ext:2', `ext:${id}`]);
+  const opening = h.command(socket, 'open', { url: 'https://second.example/path?private=123' });
+  const pending = h.controller.status().siteRequest;
+  assert.equal(pending.origin, 'https://second.example');
+  assert.equal(JSON.stringify(pending).includes('private'), false);
+  assert.equal(h.calls.create.length, 1);
+  assert.equal((await h.ui('decideSite', { id: pending.id, allow: true })).error.code, 'UNTRUSTED_SENDER');
+  assert.equal((await h.decideSite(true, 'stale')).error.code, 'STALE_SETTINGS');
+  assert.equal((await h.command(socket, 'open', { url: 'https://third.example/' })).error.code, 'SITE_APPROVAL_PENDING');
+  assert.equal((await h.decideSite(true)).ok, true);
+  assert.equal((await opening).ok, true);
+  assert.deepEqual(h.local[LOCAL].grant, { enabled: true, allowExistingTabs: false, allowedOrigins: [ORIGIN, pending.origin] });
+  assert.ok(socket.sent.some(frame => frame.type === 'permissions' && frame.permissions.allowedOrigins.includes(pending.origin)));
+  assert.equal(h.controller.status().siteRequest, null);
+  assert.equal(h.attached.has(id), true);
+  assert.equal(h.instances.length, 1);
+});
+
+test('pausing during an approval write clears the pending site and prevents a late grant or tab', async () => {
+  const storage = deferred();
+  const started = deferred();
+  const h = harness({ storageHook(name, value) {
+    if (name === 'local' && value[LOCAL]?.grant.allowedOrigins.includes('https://second.example')) {
+      started.resolve();
+      return storage.promise;
+    }
+  } });
+  const socket = await h.connected();
+  const opening = h.command(socket, 'open', { url: 'https://second.example/' });
+  const approval = h.decideSite(true);
+  await started.promise;
+  const pausing = h.ui('pause');
+  await settle();
+  assert.equal(h.controller.status().siteRequest, null);
+  storage.resolve();
+  assert.equal((await approval).error.code, 'STALE_SETTINGS');
+  await pausing;
+  await assert.rejects(opening, /No result for open/);
+  assert.deepEqual(h.local[LOCAL].grant, { enabled: false, allowExistingTabs: false, allowedOrigins: [ORIGIN] });
+  assert.equal(h.calls.create.length, 0);
 });
 
 test('1008 authentication rejection and replaced sessions stop reconnecting', async () => {
@@ -695,7 +754,7 @@ test('a user pause during pairing wins immediately, and any late returned creden
   const response = deferred();
   const pairRequest = deferred();
   const revokeRequest = deferred();
-  const h = harness({ fetchHook: (url, _options, reply) => {
+  const h = harness({ device: null, fetchHook: (url, _options, reply) => {
     if (!url.endsWith('/pair')) {
       revokeRequest.resolve();
       return reply();
@@ -721,7 +780,7 @@ test('a user pause during pairing wins immediately, and any late returned creden
 test('session ownership survives worker restart but never browser restart, stale debugger state is released', async () => {
   const session = {
     schema: 1, instanceId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
-    ownedTabs: [1, 999], attachedTabs: [1], issuedContexts: { 1: [50] },
+    ownedTabs: [1, 999], attachedTabs: [1], issuedContexts: { 1: [50] }, activeUntil: Date.now() + 120_000,
   };
   const h = harness({ device: persisted(), session });
   await h.controller.ready;
@@ -733,7 +792,11 @@ test('session ownership survives worker restart but never browser restart, stale
   const resumed = await h.connected();
   assert.equal((await h.cdp(resumed, 1, 'Runtime.evaluate', evaluation(50))).error.code, 'CDP_CONTEXT_GONE');
   assert.equal((await h.cdp(resumed, 1, 'Runtime.evaluate', evaluation(999))).error.code, 'ACCESS_DENIED');
-  const restarted = harness({ device: persisted() });
+  const restarted = harness({ device: persisted(), session: null });
+  await restarted.controller.ready;
+  assert.equal(restarted.controller.status().paired, true);
+  assert.equal(restarted.controller.status().enabled, false);
+  assert.equal(restarted.instances.length, 0);
   const socket = await restarted.connected();
   assert.notEqual(socket.sent.find(message => message.type === 'hello').instanceId, session.instanceId);
   assert.equal(restarted.controller.status().ownedTabCount, 0);
@@ -760,11 +823,11 @@ test('queued alarm/startup cannot connect during a pending resume write, and a c
   assert.equal(h.local[LOCAL].grant.enabled, false);
 });
 
-test('queued alarm cannot connect with a newly-issued pairing token before persistence', async () => {
+test('pairing saves the credential but stays inactive until the user activates', async () => {
   const storage = deferred();
   const started = deferred();
-  const h = harness({ storageHook: (name, value) => {
-    if (name === 'local' && value[LOCAL]?.token && value[LOCAL]?.grant.enabled) {
+  const h = harness({ device: null, storageHook: (name, value) => {
+    if (name === 'local' && value[LOCAL]?.token) {
       started.resolve();
       return storage.promise;
     }
@@ -777,8 +840,39 @@ test('queued alarm cannot connect with a newly-issued pairing token before persi
   assert.equal(h.instances.length, 0);
   storage.resolve();
   assert.equal((await pairing).ok, true);
+  assert.equal(h.instances.length, 0);
+  assert.equal(h.local[LOCAL].grant.enabled, false);
+  assert.equal(h.controller.status().paired, true);
+  assert.equal(h.alarms.has('mbrowser.idle'), false);
+});
+
+test('idle expiry closes the bridge, releases tabs and keeps only the saved site approval', async () => {
+  let time = Date.now();
+  const h = harness({ now: () => time });
+  const socket = await h.connected();
+  const first = h.alarms.get('mbrowser.idle').when;
+  time += 15_000;
+  await h.command(socket, 'tabs');
+  await h.ui('getStatus');
+  socket.server({ type: 'ping' });
+  assert.equal(h.alarms.get('mbrowser.idle').when, first);
+  const id = await h.own(socket);
+  assert.equal((await h.cdp(socket, id, 'Page.enable')).ok, true);
+  assert.equal(h.attached.size, 1);
+  const renewed = h.alarms.get('mbrowser.idle').when;
+  assert.ok(renewed > first);
+  time = renewed + 1;
+  await h.controller.handleAlarm({ name: 'mbrowser.idle' });
+  assert.equal(h.controller.status().notice, 'IDLE');
+  assert.equal(h.controller.status().enabled, false);
+  assert.equal(socket.readyState, 3);
+  assert.equal(h.attached.size, 0);
+  assert.equal(h.alarms.has('mbrowser.idle'), false);
+  assert.equal(h.sessionData[SESSION].activeUntil, 0);
+  assert.deepEqual(h.local[LOCAL].grant, { enabled: false, allowExistingTabs: false, allowedOrigins: [ORIGIN] });
+  await h.controller.handleStartup();
   assert.equal(h.instances.length, 1);
-  assert.equal(h.local[LOCAL].grant.enabled, true);
+  assert.equal(h.tabs.has(id), true);
 });
 
 test('failed startup storage never enables later pairing or an alarm connection', async () => {

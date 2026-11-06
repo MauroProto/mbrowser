@@ -71,8 +71,8 @@ export function validToken(value) {
 }
 
 export function normalizeAllowedOrigins(input, { allowWildcard = true } = {}) {
-  if (!Array.isArray(input) || input.length === 0 || input.length > 100) {
-    fail('INVALID_ORIGINS', 'Autoriza al menos un origen exacto o elige todos los sitios.');
+  if (!Array.isArray(input) || input.length > 100) {
+    fail('INVALID_ORIGINS', 'La lista de sitios autorizados no es válida.');
   }
   if (allowWildcard && input.length === 1 && input[0] === '*') return ['*'];
   const result = [];
@@ -92,17 +92,6 @@ export function normalizeAllowedOrigins(input, { allowWildcard = true } = {}) {
     if (!result.includes(parsed.origin)) result.push(parsed.origin);
   }
   return result;
-}
-
-export function normalizeConsent(input) {
-  if (!isRecord(input) || input.accepted !== true || typeof input.allowExistingTabs !== 'boolean') {
-    fail('CONSENT_REQUIRED', 'Revisa el alcance y confirma tu autorización antes de conectar.');
-  }
-  return {
-    enabled: true,
-    allowExistingTabs: input.allowExistingTabs,
-    allowedOrigins: normalizeAllowedOrigins(input.allowedOrigins),
-  };
 }
 
 export function normalizeWebUrl(input) {

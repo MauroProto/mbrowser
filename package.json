@@ -1,6 +1,6 @@
 {
   "name": "@local/mbrowser",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "private": true,
   "description": "Conecta DeepSeek Harness con Chrome y supervisa sus pestañas en segundo plano.",
   "repository": { "type": "git", "url": "git+https://github.com/MauroProto/mbrowser.git" },
@@ -36,6 +36,7 @@
     "lib/bridge.js",
     "lib/engine.js",
     "lib/extension-transport.js",
+    "lib/link-chrome.js",
     "lib/page-functions.js",
     "lib/tools.js",
     "extension/*.js",
