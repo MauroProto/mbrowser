@@ -3,7 +3,7 @@
   "name": "mbrowser · Chrome bajo tu control",
   "short_name": "mbrowser",
   "description": "Conecta tu Chrome con DeepSeek Harness, con autorización persistente, alcance visible y pausa inmediata.",
-  "version": "3.1.0",
+  "version": "3.1.1",
   "minimum_chrome_version": "120",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAmswM/K9wgDZ6vOA5zYwz4d8IdjE/AN0Oq6DxsIrXIqw9qXno6zmWMD+RHjWurszJpN4N0FaRs/n6g9swPTdSDQRDbD+c0q3dbnkTnxBEQLuaknGv8/Tyv1qJIy4BkrfI12zhitc+BAucPsWUZWaCzzC3jdZTpRrv0itW8D2pGBTBdbsQYBzxKznN497C10MHh66PF+7ESsgRShikipRHSth55xfqKjewoWefZQlg8CcvyHzak18n7uIakVrB/usi8rtLWrGXLCWr8OkunGUMqxm4HHnjRFgRMvQ1zsMJbdRRUeViyFTy1yRoBNuxyO9s20BRwQdag1ttJetUUakDnwIDAQAB",
   "permissions": ["debugger", "tabs", "storage", "alarms", "sidePanel"],

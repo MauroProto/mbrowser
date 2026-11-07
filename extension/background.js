@@ -306,7 +306,7 @@ export class BackgroundController {
               if (this.#device.token && this.#device.port !== link.port) {
                 fail('ALREADY_PAIRED', 'Desconectá el otro Harness en el panel y volvé a elegir /mbrowser.');
               }
-              if (!this.#device.token) await this.#pair(link);
+              if (!this.#device.token || this.#notice === 'AUTH_REJECTED') await this.#pair(link);
               break;
             }
             case 'decideSite':

@@ -27,6 +27,10 @@ A clean Windows test used DeepSeek Harness 0.2.2-rc.1 and Chrome 156. It install
 
 The packaged build was installed in an isolated Harness profile on Windows. A disposable Chrome profile opened the registered human command's loopback URL and linked with control disabled. After activation, one site approval completed the original background open. The local fixture verified read, click, typing, scroll, foreground selection and the preview pointer. A public YouTube search loaded in a separate background tab. Idle expiry disconnected control while leaving tabs open. The run also verified denial, manual deactivation, reactivation, reconnect during an active window and authenticated disconnect.
 
+## Unpacked extension upgrade for 3.1.1
+
+In a disposable Windows Chrome profile with Developer mode enabled, we loaded the 2.0.0 extension and replaced its files in the same folder. Chrome continued reporting 2.0.0 until we invoked the legacy toolbar action. That action reloaded the extension as 3.1.1 and kept the ordinary tabs open. We verified the new connection with the packaged Harness plugin, activation, deactivation and the public YouTube search for torta vasca.
+
 ## Optional native CDP fixture tests
 
 The developer suite in `tests/live/browser.test.js` uses a disposable Chrome debugger supplied explicitly by the tester. It limits mutations to tabs it creates at its own local fixture origin. This suite exercises browser behavior below the extension transport.

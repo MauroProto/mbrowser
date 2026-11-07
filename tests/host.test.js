@@ -4,6 +4,7 @@ import http from 'node:http';
 import { once } from 'node:events';
 import { Config, parseConfig, apply, createRunner, createToolDefinitions, inject, name } from '../host-v2.js';
 import { createLinkCommand } from '../lib/link-chrome.js';
+import manifest from '../package.json' with { type: 'json' };
 import { MemoryCredentials, deferred } from './helpers/credentials.js';
 import { requestHttp } from './helpers/http.js';
 
@@ -114,7 +115,7 @@ test('pure tool definitions have exact action/schema forwarding, bounded outputs
 test('runner status directs the user to the human command and never generates or returns a code', async () => {
   const { run, calls } = runner();
   const first = await run('status');
-  assert.equal(first.backend, 'extension'); assert.equal(first.version, '3.1.0'); assert.equal(first.state_persisted, true);
+  assert.equal(first.backend, 'extension'); assert.equal(first.version, manifest.version); assert.equal(first.state_persisted, true);
   assert.equal(first.extension_directory, undefined);
   assert.ok(first.setup.some((line) => line.includes('/mbrowser')));
   assert.equal(first.pairing, undefined);

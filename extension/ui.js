@@ -12,7 +12,7 @@ const notices = Object.freeze({
   DETACHED_BY_USER: 'Chrome detuvo el control. Pulsá Activar para seguir.',
   DEBUGGER_BUSY: 'Cerrá la otra sesión de depuración antes de activar.',
   CONNECTION_REPLACED: 'Otro Chrome tomó la conexión.',
-  AUTH_REJECTED: 'Desconectá y elegí /mbrowser en Harness para volver a vincular.',
+  AUTH_REJECTED: 'Elegí /mbrowser en Harness para volver a vincular.',
   PROTOCOL_ERROR: 'Actualizá mbrowser en Chrome y en Harness.',
   IDLE: 'mbrowser se desactivó por inactividad.',
   REVOCATION_PENDING: 'Desconectado en Chrome. Se completará al abrir el Harness anterior.',

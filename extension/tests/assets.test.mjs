@@ -18,7 +18,7 @@ test('original icons are real PNGs in every declared Chrome size', async () => {
 
 test('Spanish pages resolve all local assets, have unique IDs and no inline or remote active content', async () => {
   const common = await readFile(file('ui.js'), 'utf8');
-  for (const name of ['options', 'panel']) {
+  for (const name of ['options', 'panel', 'popup']) {
     const html = await readFile(file(`${name}.html`), 'utf8');
     const js = await readFile(file(`${name}.js`), 'utf8');
     assert.match(html, /<html lang="es">/);
@@ -38,8 +38,10 @@ test('Spanish pages resolve all local assets, have unique IDs and no inline or r
     assert.doesNotMatch(js + common, /\b(?:innerHTML|outerHTML|document\.write|eval|Function|localStorage|sessionStorage)\b/);
     assert.doesNotMatch(js + common, /\b(?:fetch|WebSocket)\s*\(/);
     assert.doesNotMatch(js + common, /chrome\.storage/);
-    for (const required of ['status-title', 'status-detail', 'status-dot', 'feedback', 'notice']) {
-      assert.ok(ids.includes(required), `${name} is missing #${required}`);
+    if (name !== 'popup') {
+      for (const required of ['status-title', 'status-detail', 'status-dot', 'feedback', 'notice']) {
+        assert.ok(ids.includes(required), `${name} is missing #${required}`);
+      }
     }
   }
   const css = await readFile(file('styles.css'), 'utf8');

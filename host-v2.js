@@ -60,7 +60,7 @@ export function createRunner({ engine, bridge, signal: lifetimeSignal }) {
       const result = { ...status, version: manifest.version, engine_revision: engine?.constructor?.revision || 'unknown', state_persisted: true };
       if (!result.connected) result.setup = result.paired
         ? ['Abrí mbrowser en Chrome y pulsá Activar.']
-        : ['Con la extensión instalada, elegí /mbrowser en el Harness que quieras conectar.'];
+        : ['Abrí el icono de mbrowser en Chrome y elegí /mbrowser en el Harness que quieras conectar.'];
       return result;
     }
     if (action === 'js' || action === 'shot') {

@@ -389,6 +389,24 @@ test('an unsigned pairing reply or revocation acknowledgement is rejected', asyn
   assert.ok(!JSON.stringify(paired.calls.fetch).includes(TOKEN));
 });
 
+test('a fresh Harness link repairs a rejected device without changing a healthy binding', async () => {
+  const h = harness({ device: persisted() });
+  await h.controller.ready;
+  assert.equal((await h.pair()).ok, true);
+  assert.equal(h.calls.fetch.length, 0);
+  assert.equal(h.local[LOCAL].token, TOKEN);
+  const oldSocket = h.instances[0];
+  oldSocket.close(1008, 'authorization rejected');
+  await settle();
+  assert.equal(h.controller.status().paired, true);
+  assert.equal(h.controller.status().notice, 'AUTH_REJECTED');
+  assert.equal((await h.pair()).ok, true);
+  assert.equal(h.calls.fetch.length, 1);
+  assert.notEqual(h.local[LOCAL].token, TOKEN);
+  assert.equal(h.controller.status().connection, 'paused');
+  assert.deepEqual(h.controller.status().permissions.allowedOrigins, []);
+});
+
 test('default owns-only hides all user tabs; open is inactive and close never touches a user-created tab', async () => {
   const h = harness();
   const socket = await h.connected();

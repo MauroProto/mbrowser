@@ -6,14 +6,16 @@ Usá DeepSeek Harness para trabajar en pestañas de Chrome en segundo plano. En 
 
 Necesitás [DeepSeek Harness 0.2.2-rc.1](https://www.deepseek.com/harness/en/) y Chrome 120 o posterior.
 
-1. [Descargá la extensión](https://github.com/MauroProto/mbrowser/releases/download/v3.1.0/mbrowser-extension-3.1.0.zip) y descomprimila fuera del espacio de trabajo del agente. En `chrome://extensions`, activá **Modo de desarrollador** y usá **Cargar descomprimida** para elegir la carpeta que contiene `manifest.json`.
+1. [Descargá la extensión](https://github.com/MauroProto/mbrowser/releases/download/v3.1.1/mbrowser-extension-3.1.1.zip) y descomprimila fuera del espacio de trabajo del agente. En `chrome://extensions`, activá **Modo de desarrollador** y usá **Cargar descomprimida** para elegir la carpeta que contiene `manifest.json`.
 2. En Harness, abrí **Complementos → Instalar** y pegá la dirección del paquete.
 
 ```text
-https://github.com/MauroProto/mbrowser/releases/download/v3.1.0/mbrowser-3.1.0.tgz
+https://github.com/MauroProto/mbrowser/releases/download/v3.1.1/mbrowser-3.1.1.tgz
 ```
 
 3. En el Harness que quieras usar, elegí el comando **`/mbrowser`**. Chrome abre mbrowser y conecta las dos aplicaciones.
+
+Si actualizaste los archivos en la carpeta que ya usaba Chrome, abrí una vez el icono de mbrowser para que Chrome cargue la actualización. Después elegí **`/mbrowser`** en Harness.
 
 Si usás Harness Web desde la terminal, instalá el paquete con `dsh plugin --profile web add <dirección-del-paquete>` y arrancá con `dsh web`. [Guía de complementos de Harness](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/user/develop/basic/publish.md)
 

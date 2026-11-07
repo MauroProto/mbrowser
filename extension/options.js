@@ -1,4 +1,5 @@
 import { feedback, observeStatus, renderStatus, request } from './ui.js';
+import { reloadLegacyManifest } from './reload-legacy.js';
 
 const $ = id => document.getElementById(id);
 const showPanel = $('show-panel');
@@ -26,8 +27,12 @@ showPanel.addEventListener('click', () => {
   }
 });
 
-tab = await chrome.tabs.getCurrent();
-observeStatus(update);
-const initial = await request({ action: 'consumeLink' });
-if (initial.status) update(initial.status);
-if (!initial.ok) feedback(initial.error.message, true);
+if (reloadLegacyManifest()) {
+  $('status-title').textContent = 'Actualizando mbrowser…';
+} else {
+  tab = await chrome.tabs.getCurrent();
+  observeStatus(update);
+  const initial = await request({ action: 'consumeLink' });
+  if (initial.status) update(initial.status);
+  if (!initial.ok) feedback(initial.error.message, true);
+}
